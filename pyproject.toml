@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bootstrap-wall3t"
+version = "1.0.0"
+description = "Autonomous Agent Multi-Chain Financial Architecture & Universal High-Security Wallet"
+readme = "docs/HARDENED_PLAN.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Sats-Stack Core Team" }
+]
+dependencies = [
+    "cryptography>=43.0.0",
+    "pydantic>=2.0.0",
+    "fastapi>=0.100.0",
+    "requests>=2.28.0",
+    "httpx>=0.24.0",
+    "uvicorn>=0.22.0"
+]
+
+[project.scripts]
+bootstrap_wall3t = "bootstrap_wall3t.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bootstrap_wall3t*"]

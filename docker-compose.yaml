@@ -1,0 +1,57 @@
+  bitcoin:
+    image: ruimarinho/bitcoin-core:0.22.0
+    container_name: bitcoin
+    restart: unless-stopped
+    volumes:
+      - ./data/bitcoin:/bitcoin/.bitcoin
+    ports:
+      - "8332:8332"  # RPC
+      - "8333:8333"  # P2P
+    command: ["-regtest", "-rpcallowip=0.0.0.0/0", "-rpcuser=dev", "-rpcpassword=devpass", "-disablewallet"]
+
+  geth:
+    image: ethereum/client-go:stable
+    container_name: geth
+    restart: unless-stopped
+    volumes:
+      - ./data/geth:/root/.ethereum
+    ports:
+      - "8545:8545"  # RPC
+      - "30303:30303"  # P2P
+    command: ["--dev", "--http", "--http.addr=0.0.0.0", "--http.port=8545", "--http.api=eth,net,web3"]
+
+  lnd:
+    image: lightninglabs/lnd:v0.20.0-beta
+    container_name: lnd
+    restart: unless-stopped
+    volumes:
+      - ./data/lnd:/root/.lnd
+    ports:
+      - "9735:9735"    # P2P
+      - "10009:10009"  # gRPC (localhost only)
+    command: >
+      --bitcoin.active
+      --bitcoin.mainnet
+      --bitcoin.node=neutrino
+      --neutrino.addpeer=faucet.lightning.community
+      --rpc.listen=0.0.0.0:10009
+      --rpclisten=0.0.0.0:10009
+      --rest.listen=0.0.0.0:8080
+      --restlisten=0.0.0.0:8080
+
+  aperture:
+    image: lightninglabs/aperture:latest
+    container_name: aperture
+    restart: unless-stopped
+    depends_on:
+      - lnd
+    volumes:
+      - ./data/aperture:/root/.aperture
+    ports:
+      - "8081:8081"
+    command: >
+      --listenaddr=0.0.0.0:8081
+      --insecure
+      --authenticator.lndhost=lnd:10009
+      --authenticator.tlspath=/root/.aperture/tls.cert
+      --authenticator.macdir=/root/.aperture

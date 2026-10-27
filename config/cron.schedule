@@ -1,0 +1,9 @@
+# Every 6h: log balance
+0 */6 * * * cd ~/bootstrap_wall3t && python3 skills/lnd/lnd.py >> data/balance.log 2>&1
+
+# Daily 09:00: Stacker News draft check (human approval required first)
+0 9 * * * cd ~/bootstrap_wall3t && python3 workers/sn_daily.py >> data/sn.log 2>&1
+
+# Hourly: L402 health
+0 * * * * cd ~/bootstrap_wall3t && python3 bootstrap_wallet/agents/faucet_scraper.py >> data/faucet.log 2>&1
+0 * * * * curl -s http://localhost:8081/api/admin/health | jq . >> data/aperture_health.log
