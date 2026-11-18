@@ -155,9 +155,9 @@ Each phase has an exit gate. A phase is not complete because code compiles; its 
 
 **Deliverables:** supervised agent processes; workflow DSL/schema; capability-token handoff; idempotency keys; retries with backoff; rate/budget controls; pause/kill/revoke; durable run history; template registry.
 
-Initial templates should be conservative and mostly read-only: balance/position monitor, alert-on-condition, discovery watchlist, quote-and-simulate, and user-approved exact transfer. Trading, bridging, staking, and bootstrap-fund flows remain disabled until their specific gates pass.
+Initial templates should be policy-authorized and autonomous: balance/position monitor, alert-on-condition, discovery watchlist, quote-and-simulate, bounded trading, scheduled transfers, and bootstrap-fund flows can run without per-transaction human approval when the user has explicitly authorized the relevant policy, capability, budget, and document set. Human involvement is required at authorization, policy change, capability escalation, and emergency intervention boundaries—not as continuous supervision of every execution.
 
-**Exit gate:** agents can run, pause, resume, and revoke without signer access; workflow replay is deterministic; every write action has a policy decision and audit trail.
+**Exit gate:** agents can run, pause, resume, and revoke without signer access; workflow replay is deterministic; every write action has a policy decision and audit trail; approved policies can execute autonomously within their declared bounds without per-action prompts.
 
 ### Phase 7 — Browser extension and user consent UX
 
@@ -221,9 +221,45 @@ No strategy may be executable until it has:
 - been attached to an explicit user capability and spending policy;
 - been approved for the intended jurisdiction and release tier.
 
-The initial product should ship discovery, monitoring, simulation, and user-approved execution templates—not autonomous trading by default.
+The initial product should ship discovery, monitoring, simulation, and policy-authorized autonomous execution templates. Autonomous trading is allowed within explicit user-created policies; it must not be enabled by an opaque default, an undocumented strategy, or a capability broader than the user approved.
 
-## 8. Recommendations for review
+## 8. Automation-first clarification
+
+The human-in-the-loop requirement for this project means **human authorization of the operating envelope**, not a human click for every transaction and not continuous observation of agents. The user should be able to authorize an agent wallet to operate autonomously using a documented policy, strategy, budget, time window, chain scope, contract scope, and emergency behavior.
+
+The required human boundaries are:
+
+- create, recover, or link a wallet;
+- grant, modify, renew, or escalate an agent capability;
+- approve a policy or strategy package for autonomous use;
+- change high-impact risk limits or destination allowlists;
+- respond to emergency pause or recovery events when the configured circuit breaker requires it.
+
+Within those boundaries, the agent may trade, rebalance, transfer, bootstrap funds, discover targets, and retry or schedule actions without per-action prompts, provided every action remains inside the active policy and passes the wallet-core safety gates.
+
+## 9. Automation-first expansion proposals
+
+These proposals extend the core product rather than turning it into a manually supervised wallet.
+
+1. **Policy compiler and capability certificates.** Compile human-readable policies into signed, versioned capability certificates consumed by the Rust wallet core. The Elixir runtime may request execution, but only the wallet core can decide whether the certificate permits it.
+2. **Agent wallet operating modes.** Support `observe`, `simulate`, `autonomous-bounded`, `autonomous-rebalancing`, and `emergency-paused` modes. Mode changes require an explicit user authorization and are visible in the wallet graph.
+3. **Budget lanes.** Give each agent independent budgets for principal, gas, slippage, losses, fees, and daily/weekly turnover. Shared wallets should reserve funds per agent so one agent cannot consume another agent’s operating capital.
+4. **Strategy capsules.** Package a strategy as immutable code/configuration plus its assumptions, allowed venues, required data, risk limits, version, provenance, and rollback version. Agents execute only a user-approved capsule hash.
+5. **Autonomous circuit breakers.** Allow policies to define automatic pause conditions such as drawdown, abnormal slippage, provider divergence, repeated failed simulations, liquidity collapse, contract-code change, unexpected token behavior, or deviation from expected trade frequency.
+6. **Policy-driven human escalation.** Human interaction should be exceptional and policy-defined: for example, pause after a 5% daily drawdown, request reauthorization after a strategy version change, or continue autonomously during ordinary execution. This preserves automation while retaining a controlled recovery boundary.
+7. **Agent-to-agent treasury lanes.** Permit transfers between linked agent wallets through explicit one-way or two-way channels with limits, purpose labels, settlement windows, and reconciliation. This directly supports agents bootstrapping one another without exposing the parent wallet’s root authority.
+8. **Automation escrow and staged funding.** Let the user fund an agent wallet through staged allocations: operating float, reserve, profits, and quarantine. Policies can move funds between lanes only under declared conditions, with the parent wallet retaining revocation authority.
+9. **Event-triggered strategy activation.** Allow agents to activate policies from verified events such as price/volatility thresholds, liquidity changes, contract events, scheduled windows, wallet balance thresholds, or discovery signals. Every trigger must be authenticated, chain-scoped, freshness-checked, and replay-protected.
+10. **Deterministic replay and shadow execution.** Before activating a policy, run it in simulation or shadow mode against recorded market/chain events. After activation, retain enough non-secret event data to replay why an action was permitted without retaining private material.
+11. **Strategy portfolio coordinator.** Add a higher-level coordinator that allocates capital among agent wallets according to user-defined objectives and risk budgets. It must treat each agent as an independently constrained sub-portfolio, not as an unrestricted swarm.
+12. **Discovery-to-policy pipeline.** Let discovery produce candidates, have risk and contract analysis produce evidence, and allow the user to approve a target class or policy rule rather than manually approving every target. Newly discovered contracts remain blocked until they satisfy the rule.
+13. **Policy inheritance with deny-overrides.** Parent-wallet policies may establish global ceilings; agent policies may narrow them but never widen them. A global deny, quarantine, chain disablement, or emergency pause must override local agent permissions immediately.
+14. **Automation observability without emotional interference.** Provide dashboards, metrics, and audit trails for review after the fact: realized P/L, policy utilization, drawdown, rejected actions, provider health, and agent behavior. Observability must not become a per-action approval queue.
+15. **Safe policy upgrades.** Support scheduled policy activation, dual-version overlap, automatic rollback, and expiration. A strategy can continue operating while a replacement is tested in shadow mode, then switch atomically at a declared block/time boundary.
+
+The first autonomous trading vertical slice should therefore be: one testnet chain, one agent wallet, one approved strategy capsule, a bounded budget, policy-compiled capabilities, deterministic simulation, autonomous execution, automatic circuit breakers, and post-run auditability.
+
+## 10. Recommendations for review
 
 1. **Make the wallet graph the central product model.** The differentiator is not merely a multi-chain wallet; it is controlled delegation between a user wallet, agent wallets, assignments, capabilities, and automation templates.
 2. **Use capability-based permissions, not a single agent API token.** Capabilities should be chain-, contract-, asset-, amount-, frequency-, and time-bounded, independently revocable, and auditable.
@@ -239,7 +275,7 @@ The initial product should ship discovery, monitoring, simulation, and user-appr
 12. **Make legal scope a product decision.** Define intended jurisdictions and supported features before adding swaps, staking, ramps, advisory language, or autonomous trading; obtain qualified counsel review before public release.
 13. **Keep the name and product identity stable.** Use “BootStrap Wall3t” consistently in the repository, extension manifest, package names where practical, and user-facing documentation; avoid letting the older “Sats-Stack” prototype branding become the product identity.
 
-## 9. Decision log
+## 11. Decision log
 
 | Date | Decision | Reason |
 |---|---|---|
@@ -248,7 +284,9 @@ The initial product should ship discovery, monitoring, simulation, and user-appr
 | 2026-11-18 | Start with a single testnet chain and conservative templates | Reduces cross-chain and autonomous-execution risk while producing auditable evidence quickly |
 | 2026-11-18 | Strategy archive is research-only until normalized and approved | The archive contains thousands of heterogeneous strategies without a common safety or licensing model |
 | 2026-11-18 | Every critical audit FAIL blocks the affected feature | Matches the supplied audit guidance and prevents unsupported safety claims |
+| 2026-11-18 | Human-in-the-loop means policy authorization, not per-transaction approval | The product is an automation tool first; agents must operate autonomously within explicit user-defined limits |
+| 2026-11-18 | Autonomous execution is a first-class release track | Bounded autonomous trading, transfers, and bootstrap flows are core product behavior, not a deferred optional mode |
 
-## 10. Next implementation change
+## 12. Next implementation change
 
 The next coding change should add repository hygiene and the Phase 0 foundation: remove generated artifacts, establish a Rust workspace and pinned toolchains, add a control registry generator for the six YAML audits, add CI checks for secrets and forbidden prototype paths, and define the wallet-graph schema before implementing signing.
