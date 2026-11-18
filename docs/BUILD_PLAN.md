@@ -89,20 +89,78 @@ Browser extension UI
 The Rust service must expose opaque wallet and agent identifiers, public addresses, policy decisions, simulations, receipts, and audit records—not seeds, private keys, raw keystore bytes, or unrestricted signer handles.
 
 ### 4.2 Wallet graph and capabilities
-
 The domain model must include:
-
 - `UserWallet`: root ownership, recovery metadata, supported chains, and global policy.
 - `AgentWallet`: a derived or independently provisioned signer identity linked to one user wallet.
 - `AgentAssignment`: many-to-many relationship between agents, wallets, workflows, and scopes.
-- `Capability`: explicit permissions such as read-only discovery, quote, simulation, exact transfer, bounded swap, or template execution.
+- `Capability`: explicit machine-enforced operating authority such as discovery, quote, simulation, transfer, swap, staking, bootstrap, or template execution.
 - `Policy`: chain, contract, asset, amount, frequency, slippage, fee, time-window, and approval constraints.
 - `Revocation`: immediate disablement of an agent, capability, session, template, contract, provider, or chain.
 - `AuditEvent`: append-only record of who/what requested, simulated, approved, signed, broadcast, or revoked an action.
+The user authorizes autonomy by creating/funding an agent wallet and attaching a policy, strategy, and operating budget. An agent may autonomously use all assets held in its own wallet within the active policy; no per-transaction approval is required. An agent can never debit, borrow from, or derive authority from the parent wallet. Multiple agents may be assigned to the same wallet only through explicit shared-wallet policy semantics and independent accounting of each agent's actions.
 
-Default relationship: an agent has no write capability. A user must explicitly grant a capability with an expiry and spending/risk bounds. Multiple agents may be assigned to the same wallet only through a conflict-aware policy evaluator and independent per-agent budgets.
+### 4.3 Three-vault custody architecture
 
-### 4.3 Language allocation
+The project uses three separate vault domains with separate keys, processes, permissions, storage, and audit scopes. The names are intentional and must not be collapsed into one generic vault.
+
+#### Secrets Vault — credentials and signing material
+
+The Secrets Vault holds sensitive key- or authentication-based material:
+
+- user and agent wallet private keys;
+- seed phrases and mnemonics;
+- API keys and service credentials;
+- OAuth tokens and refresh tokens;
+- SSH keys and certificates;
+- signing keys, authentication keys, webhook secrets, and other credential material.
+
+The Elixir runtime and UI must never receive raw Secrets Vault contents. The Rust wallet boundary may request opaque signer operations. Operational service credentials must be scoped to the smallest agent or integration and must not be reused as wallet-signing authority.
+
+#### Automations Vault — policy and orchestration material
+
+The Automations Vault holds non-signing automation state:
+
+- policies and policy versions;
+- strategy and document packages;
+- automation loop configurations;
+- schedules, triggers, retry and backoff settings;
+- workflow definitions, prompts, discovery rules, and template metadata;
+- agent operating modes and circuit-breaker configuration.
+
+Automations Vault data can instruct an agent, but it cannot itself authorize access to the parent wallet or bypass Rust policy evaluation. Every executable policy references a versioned document/strategy hash and a wallet/agent scope.
+
+#### Financial Cold Vault — user-only long-term custody
+
+The Financial Cold Vault is a user-wallet-side cold-storage domain for assets the user intends to retain outside the automation float. It may hold crypto and supported fiat or fiat claims, with hardware-generated keys and hardware-backed authorization. It is not an agent funding pool and is not available to agent processes.
+
+Cold-vault withdrawals must support adjustable, user-configured time delays before assets can move to:
+
+- a user hot wallet;
+- an explicitly approved agent wallet;
+- a fiat bank or equivalent financial destination;
+- another user-approved external destination.
+
+The delay applies to outgoing transfers regardless of whether the destination is crypto or fiat. A hardware-backed user authorization, destination verification, delay timer, cancellation window, and immutable audit record are required. Semi-flexible staking positions may be supported only where the protocol's lock, unstake, cooldown, slashing, liquidity, and withdrawal behavior are explicitly represented. Agents may observe cold-vault balances or permitted public position data, but cannot initiate, accelerate, cancel, or redirect cold-vault withdrawals.
+
+### 4.4 Global quarantine and automatic blacklist
+
+The wallet has a shared, monotonic token-quarantine service covering the user wallet and every linked agent wallet. If the user or any agent discovers a bad coin, token, contract, deployer, or trading pair, the discovering wallet can immediately publish a quarantine record. This does not require agent-to-agent discussion, negotiation, or approval.
+
+Required invariants:
+
+- Quarantine is enforced synchronously at every wallet-core transaction, approval, permit, swap, bridge, staking, transfer, and strategy execution gate.
+- A quarantine record is chain-scoped and identifies the token/contract/pair/deployer, reason, evidence, reporter, timestamp, and registry version.
+- The default state is deny-on-uncertainty: if a wallet cannot obtain the current quarantine state, it cannot execute an affected write operation.
+- Quarantine propagation uses a shared authoritative registry plus signed replicated deny state or an equivalent strongly consistent mechanism. Agents do not need to communicate with one another to blacklist an asset.
+- Once any authorized wallet quarantines an asset, all linked wallets reject it at the next policy check and must invalidate cached allow decisions immediately.
+- Only the user can reverse a quarantine. Agents cannot remove, weaken, expire, or override a blacklist entry.
+- User unquarantine requires explicit identity/hardware authorization, evidence review, a new registry version, and a visible audit event. It must not silently restore prior permissions.
+- A quarantine entry must override strategy policies, discovery results, allowlists, cached quotes, and existing automation templates.
+- The quarantine system must support emergency global freeze of a token, contract, deployer, pair, chain, provider, or strategy family.
+
+The blacklist is a safety and coordination primitive, not a source of trading advice. It prevents execution; it does not claim that an unlisted asset is safe.
+
+### 4.5 Language allocation
 
 - **Rust:** wallet graph, key derivation interfaces, signer isolation, transaction intent and simulation, policy, address/chain validation, adapters, state machine, audit events, and FFI boundary.
 - **Elixir:** supervision tree, scheduling, workflow execution, retries, monitors, discovery jobs, and template orchestration. It handles opaque IDs and signed capability tokens only.
@@ -123,9 +181,9 @@ Each phase has an exit gate. A phase is not complete because code compiles; its 
 
 ### Phase 1 — Domain model and threat model
 
-**Deliverables:** wallet graph schema; capability/delegation model; agent assignment semantics; revocation model; canonical identifiers; threat model; data classification; state-transition diagrams.
+**Deliverables:** wallet graph schema; capability/delegation model; agent assignment semantics; three-vault data classification and access matrix; global quarantine state machine; user-only unquarantine flow; revocation model; canonical identifiers; threat model; state-transition diagrams.
 
-**Exit gate:** user wallet can create/disable agents in a purely in-memory test domain; no transaction signing yet; policy tests cover least privilege, expiry, shared-wallet conflicts, and revocation.
+**Exit gate:** user wallet can create, fund, observe, pause, and disable agents in a purely in-memory test domain; quarantine from any wallet blocks every linked wallet; only the user can reverse it; vault access tests prove agents cannot reach the parent wallet or cold vault.
 
 ### Phase 2 — Rust wallet trust boundary
 
@@ -135,9 +193,9 @@ Each phase has an exit gate. A phase is not complete because code compiles; its 
 
 ### Phase 3 — Key custody and recovery
 
-**Deliverables:** standard mnemonic/derivation implementation using reviewed libraries; per-chain derivation registry; encrypted-at-rest keystore; OS/HSM/secure-enclave integration plan; memory exposure controls; recovery and wipe procedures; seed-generation provenance records.
+**Deliverables:** standard mnemonic/derivation implementation using reviewed libraries; per-chain derivation registry; Secrets Vault integration; separate Automations Vault integration; hardware-generated Financial Cold Vault keys; encrypted-at-rest keystore; OS/HSM/secure-enclave integration plan; adjustable cold-withdrawal delay state machine; memory exposure controls; recovery and wipe procedures; seed-generation provenance records.
 
-**Exit gate:** clean-device recovery tests for every initially supported chain; CAT1 and CHAIN6 critical controls have evidence; no claims of post-quantum protection without reviewed implementations and clear threat-model limits.
+**Exit gate:** clean-device recovery tests for every initially supported chain; cold-vault hardware-key and delayed-withdrawal tests pass; agent processes cannot access Secrets Vault raw material or Financial Cold Vault operations; CAT1 and CHAIN6 critical controls have evidence; no claims of post-quantum protection without reviewed implementations and clear threat-model limits.
 
 ### Phase 4 — First chain adapter and validated RPC
 
@@ -153,11 +211,11 @@ Each phase has an exit gate. A phase is not complete because code compiles; its 
 
 ### Phase 6 — Elixir automation runtime and templates
 
-**Deliverables:** supervised agent processes; workflow DSL/schema; capability-token handoff; idempotency keys; retries with backoff; rate/budget controls; pause/kill/revoke; durable run history; template registry.
+**Deliverables:** supervised agent processes; workflow DSL/schema; capability-token handoff; idempotency keys; retries with backoff; rate/budget controls; pause/kill/revoke; durable run history; template registry; autonomous bootstrap methods; discovery-to-policy workflows; global quarantine subscription/cache invalidation; no agent-to-agent communication requirement for blacklist enforcement.
 
 Initial templates should be policy-authorized and autonomous: balance/position monitor, alert-on-condition, discovery watchlist, quote-and-simulate, bounded trading, scheduled transfers, and bootstrap-fund flows can run without per-transaction human approval when the user has explicitly authorized the relevant policy, capability, budget, and document set. Human involvement is required at authorization, policy change, capability escalation, and emergency intervention boundaries—not as continuous supervision of every execution.
 
-**Exit gate:** agents can run, pause, resume, and revoke without signer access; workflow replay is deterministic; every write action has a policy decision and audit trail; approved policies can execute autonomously within their declared bounds without per-action prompts.
+**Exit gate:** agents can run, pause, resume, and revoke without signer access; workflow replay is deterministic; every write action has a policy decision and audit trail; approved policies can execute autonomously within their declared bounds without per-action prompts; a quarantine reported by one wallet blocks all linked wallets before their next write operation.
 
 ### Phase 7 — Browser extension and user consent UX
 
