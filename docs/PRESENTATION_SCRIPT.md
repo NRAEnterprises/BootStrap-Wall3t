@@ -83,6 +83,8 @@ This structure supports automation without turning configuration storage into an
 
 The production registry design adds a signed checkpoint and versioned state root to this picture. A strategy activation records the registry version it saw. If the registry advances, the old activation decision is stale and must be rebuilt.
 
+For quorum choices, three nodes are appropriate only for trusted-operator crash-fault tolerance: two of three can commit, but the topology is not Byzantine tolerant. Seven nodes can support two Byzantine faults under a real BFT protocol, with five-of-seven commit certificates. The design recommendation is three-node Raft for the first explicitly labeled crash-fault tier, and seven-node BFT when independent operators or malicious-node resistance are required.
+
 **Transition:** The third vault is intentionally outside the automation float and has a different release protocol.
 
 ## Slide 6 — Financial Cold Vault
@@ -142,6 +144,8 @@ At simulation, wallet core derives the footprint and records the certified regis
 Signing also rechecks the footprint. This catches a quarantine that targets the operation directly. Broadcast performs a final read barrier and repeats both checks. A signed payload is not automatically safe to release if the global deny state moved after signing.
 
 The verified Rust suite covers concurrent quarantine-versus-signing and quarantine-versus-broadcast, reversal invalidating older tickets, router-only quarantine blocking a clean-token swap, an unavailable registry failing closed, and cross-wallet propagation over a shared registry.
+
+The reversal protocol has also been simulated across twenty vectors. All twenty produced the expected decision: valid authorization, leader failover, duplicate delivery, and a two-of-three threshold with one invalid assertion were accepted; origin, RP id, challenge, expiry, replay, record-hash, registry-version, UV, credential, counter, signature, command, record-state, checkpoint-key, freshness, and trust-bundle failures were rejected. The simulator is deliberately not a WebAuthn verifier; an audited ES256/CBOR implementation is still required for production.
 
 The next production test layer injects failures into quorum reads, leader changes, replica lag, signed-checkpoint rotation, and network partitions. The acceptance criterion remains the same: a committed deny state must beat any stale positive decision, or the write must stop.
 

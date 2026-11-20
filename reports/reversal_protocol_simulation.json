@@ -1,0 +1,191 @@
+{
+  "cryptographic_library_available": false,
+  "failed": 0,
+  "not_a_webAuthn_implementation": true,
+  "passed": 20,
+  "protocol": "bootstrap-wall3t/quarantine-reversal/v1",
+  "release_note": "Run the same vectors against an audited WebAuthn/CBOR verifier before production acceptance.",
+  "simulation_type": "deterministic_protocol_state_machine",
+  "vectors": [
+    {
+      "crypto_check": "not_available_in_sandbox",
+      "expected": "ACCEPT",
+      "hardware_crypto_required": true,
+      "name": "valid_es256_assertion",
+      "observed": "ACCEPT",
+      "passed": true,
+      "reason": "valid assertion is eligible for atomic commit"
+    },
+    {
+      "crypto_check": "not_available_in_sandbox",
+      "expected": "REJECT",
+      "hardware_crypto_required": true,
+      "name": "wrong_origin",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "origin binding failed"
+    },
+    {
+      "crypto_check": "not_available_in_sandbox",
+      "expected": "REJECT",
+      "hardware_crypto_required": true,
+      "name": "wrong_rp_id_hash",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "RP id binding failed"
+    },
+    {
+      "crypto_check": "not_available_in_sandbox",
+      "expected": "REJECT",
+      "hardware_crypto_required": true,
+      "name": "wrong_challenge",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "challenge mismatch"
+    },
+    {
+      "crypto_check": "state_machine_only",
+      "expected": "REJECT",
+      "hardware_crypto_required": false,
+      "name": "expired_challenge",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "challenge expired"
+    },
+    {
+      "crypto_check": "state_machine_only",
+      "expected": "REJECT",
+      "hardware_crypto_required": false,
+      "name": "reused_authorization_id",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "authorization replay"
+    },
+    {
+      "crypto_check": "state_machine_only",
+      "expected": "REJECT",
+      "hardware_crypto_required": false,
+      "name": "changed_quarantine_record_hash",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "reviewed record changed"
+    },
+    {
+      "crypto_check": "state_machine_only",
+      "expected": "REJECT",
+      "hardware_crypto_required": false,
+      "name": "registry_version_changed_between_review_and_commit",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "optimistic concurrency check failed"
+    },
+    {
+      "crypto_check": "not_available_in_sandbox",
+      "expected": "REJECT",
+      "hardware_crypto_required": true,
+      "name": "user_verification_flag_missing",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "user verification required"
+    },
+    {
+      "crypto_check": "not_available_in_sandbox",
+      "expected": "REJECT",
+      "hardware_crypto_required": true,
+      "name": "unknown_or_revoked_credential",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "credential status invalid"
+    },
+    {
+      "crypto_check": "not_available_in_sandbox",
+      "expected": "REJECT",
+      "hardware_crypto_required": true,
+      "name": "counter_rollback_clone_signal",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "signature counter rollback"
+    },
+    {
+      "crypto_check": "not_available_in_sandbox",
+      "expected": "REJECT",
+      "hardware_crypto_required": true,
+      "name": "invalid_signature",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "signature verification failed"
+    },
+    {
+      "crypto_check": "state_machine_only",
+      "expected": "REJECT",
+      "hardware_crypto_required": false,
+      "name": "mismatched_command_bytes",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "authorization transcript mismatch"
+    },
+    {
+      "crypto_check": "state_machine_only",
+      "expected": "ACCEPT",
+      "hardware_crypto_required": false,
+      "name": "leader_failover_during_commit",
+      "observed": "ACCEPT",
+      "passed": true,
+      "reason": "failover preserves committed head and command id"
+    },
+    {
+      "crypto_check": "state_machine_only",
+      "expected": "ACCEPT",
+      "hardware_crypto_required": false,
+      "name": "duplicate_command_delivery",
+      "observed": "ACCEPT",
+      "passed": true,
+      "reason": "idempotent duplicate"
+    },
+    {
+      "crypto_check": "state_machine_only",
+      "expected": "REJECT",
+      "hardware_crypto_required": false,
+      "name": "already_reversed_or_nonexistent_record",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "record is not active"
+    },
+    {
+      "crypto_check": "not_available_in_sandbox",
+      "expected": "REJECT",
+      "hardware_crypto_required": true,
+      "name": "untrusted_checkpoint_key",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "checkpoint trust verification failed"
+    },
+    {
+      "crypto_check": "state_machine_only",
+      "expected": "REJECT",
+      "hardware_crypto_required": false,
+      "name": "stale_checkpoint_at_sign_and_broadcast",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "freshness barrier failed"
+    },
+    {
+      "crypto_check": "not_available_in_sandbox",
+      "expected": "REJECT",
+      "hardware_crypto_required": true,
+      "name": "registry_key_rotation_during_challenge",
+      "observed": "REJECT",
+      "passed": true,
+      "reason": "trust-bundle version changed"
+    },
+    {
+      "crypto_check": "not_available_in_sandbox",
+      "expected": "ACCEPT",
+      "hardware_crypto_required": true,
+      "name": "threshold_2_of_3_with_one_invalid_assertion",
+      "observed": "ACCEPT",
+      "passed": true,
+      "reason": "2 of 3 valid assertions reached"
+    }
+  ]
+}

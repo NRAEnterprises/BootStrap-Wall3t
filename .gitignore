@@ -21,3 +21,6 @@ data/*.db
 *.swp
 .idea/
 .vscode/
+
+# Generated review packages and deck exports
+dist/

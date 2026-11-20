@@ -395,6 +395,19 @@ Two design documents now specify the path from the verified reference to product
 
 Neither document authorizes an agent to reverse a quarantine, reach the parent wallet, or bypass the Rust guard. Reversal remains an exceptional user control-plane action, not a per-transaction approval.
 
+### Quorum fault model and protocol simulation — 2026-11-20
+
+`docs/BFT_QUORUM_TRADEOFFS.md` resolves the registry topology question:
+
+- three nodes with Raft tolerate one crash and commit on two of three votes, but under `N >= 3f + 1` they support `f = 0` Byzantine faults and must not be described as BFT;
+- seven nodes support `f = 2` Byzantine faults under PBFT/HotStuff/Tendermint-style consensus with five-of-seven commit certificates, at higher latency, cost, and operational complexity;
+- seven-node Raft would improve crash tolerance but would still not be Byzantine tolerant, because node count alone does not change the fault model;
+- recommendation: three-node Raft for the first explicitly labeled crash-fault tier, seven-node BFT when independent operators or malicious-node resistance are required, with the wallet-core API consuming certified snapshots and read barriers so the consensus choice stays replaceable.
+
+`tools/simulate_reversal_protocol.py` runs the twenty reversal vectors as a deterministic protocol-state simulation. Result: 20/20 expected outcomes, 0 failures. Accepted paths are the valid assertion, leader failover, duplicate idempotent delivery, and a two-of-three threshold with one invalid assertion. Every stale, replayed, mis-bound, unverified, or untrusted path rejects.
+
+The simulator is explicitly not a WebAuthn implementation. The sandbox has no audited ES256/CBOR library, so signature and authenticator-data parsing remain a production gate rather than a claimed result. `docs/REVERSAL_PROTOCOL_SIMULATION.md` records that boundary and the eight remaining cryptographic checks.
+
 ## 12. Decision log
 
 | Date | Decision | Reason |
