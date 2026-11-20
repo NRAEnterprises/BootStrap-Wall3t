@@ -32,6 +32,23 @@ The correct status is therefore:
 
 No production-readiness claim should be made until the implementation rows are backed by code, integration tests, and audit evidence.
 
+### Update — 2026-11-20, Rust foundation drafted
+
+`rust/wallet-core` now implements the registry contract, entity scopes, intent footprint, and the three-stage trust pipeline. Verification: 21 passing tests (12 unit, 9 public-API integration) and a clean `cargo clippy --all-targets -- -D warnings` run. The status table above is superseded as follows:
+
+| Area | Architecture status | Executable implementation status |
+|---|---|---|
+| Full autonomous execution | Aligned | Pipeline supports it; no workflow runtime yet |
+| Parent-to-agent isolation | Specified | Not implemented |
+| Secrets Vault | Specified | Not implemented |
+| Automations Vault | Specified | Not implemented as an enforced boundary |
+| Financial Cold Vault | Specified | Not implemented |
+| Global automatic blacklist | Specified | Reference registry and guard implemented and tested; production store pending |
+| User-only unquarantine | Specified | Enforced by contract type; cryptographic hardware verification pending |
+| All-operation quarantine gates | Specified | One shared guard covers all operation kinds; chain adapters pending |
+
+Details and deliberate limits are recorded in `docs/RUST_WALLET_CORE.md`.
+
 ## 1. Architecture alignment review
 
 ### Full automation

@@ -347,6 +347,20 @@ The required coverage includes native and token transfers, approvals, Permit/EIP
 
 Required acceptance evidence is recorded in `docs/ARCHITECTURE_VERIFICATION.md`. The required presentation narrative is recorded in `docs/PRESENTATION_SCRIPT.md`. These files are design and verification artifacts; they do not substitute for implementation.
 
+### Implementation progress — 2026-11-20
+
+The first executable trust-boundary slice now exists at `rust/wallet-core` (crate `bootstrap-wall3t-wallet-core`), with no external dependencies:
+
+- `QuarantineRegistry` trait with monotonic `RegistryVersion`, user/agent reporters, entity-scoped evidence, and user-hardware-only reversal. Failed publishes and unknown reversal ids do not advance the version.
+- `EntityRef` scopes for token, contract, deployer, pair, chain, provider, strategy family, and wallet.
+- `IntentFootprint` covering every entity an operation can affect, guarded as a set rather than by ad-hoc field checks.
+- `WalletCore` three-stage pipeline (`simulate` → `sign` → `broadcast`) that re-reads the registry at each stage, rejects any version change as `StaleRegistry`, denies on an active match, and fails closed when the registry is unavailable.
+- `OpaqueSigner` trait so the core never handles key material.
+
+Verification: `cargo test --all-targets` passes 21 tests (12 unit, 9 public-API integration) and `cargo clippy --all-targets -- -D warnings` is clean. Coverage includes concurrent quarantine-versus-signing and quarantine-versus-broadcast races, reversal invalidating pre-existing tickets, router-only quarantine blocking a clean-token swap, all eleven operation kinds passing the same guard, newly created agents inheriting active deny state, and invalid evidence not mutating registry state.
+
+This is a reference implementation, not the production registry. It is process-local, unsigned, unpersisted, and has no chain adapter. `docs/RUST_WALLET_CORE.md` records the exact limits so no downstream claim outruns the code.
+
 ### Required next gates
 
 1. Define the wallet graph, vault access matrix, canonical entity identifiers, and quarantine state machine in Rust-domain-compatible schemas.

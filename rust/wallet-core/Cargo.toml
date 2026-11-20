@@ -1,0 +1,12 @@
+[package]
+name = "bootstrap-wall3t-wallet-core"
+version = "0.1.0"
+edition = "2021"
+description = "Wallet-core trust boundary and authoritative versioned quarantine registry for BootStrap Wall3t"
+license = "MIT"
+
+[lib]
+name = "wallet_core"
+path = "src/lib.rs"
+
+[dependencies]
