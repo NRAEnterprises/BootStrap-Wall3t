@@ -427,6 +427,18 @@ Neither document authorizes an agent to reverse a quarantine, reach the parent w
 
 The simulator is explicitly not a WebAuthn implementation. The sandbox has no audited ES256/CBOR library, so signature and authenticator-data parsing remain a production gate rather than a claimed result. `docs/REVERSAL_PROTOCOL_SIMULATION.md` records that boundary and the eight remaining cryptographic checks.
 
+### Opportunities dashboard and reversal presentation — 2026-11-20
+
+The managed Web project at `/home/ubuntu/wall3t` now contains the first reviewable opportunities-console slice. It is intentionally fixture-backed and labels the intelligence layer as reference data; it does not imply live mempool, CEX, DEX, dark-pool, or Rust execution connectivity.
+
+- The console covers deep-mempool whale activity, expected time-to-market impact, confidence, freshness, evidence, provider health, and selectable CEX/DEX/dark-pool coverage.
+- The smart-contract forge composes ordered typed calls and an intent-footprint preview while preserving the Elixir orchestration → Rust wallet-core trust boundary. It cannot sign, broadcast, unlock keys, or bypass quarantine.
+- Preview blocks fail closed for stale/unavailable quarantine, degraded providers, expired capability state, unverifiable data, and ambiguous targets.
+- The managed project passes `pnpm check`, `pnpm build`, and its declared `pnpm dev` Preview health check. Its route manifest is served from `client/public/manus-routes.json` and returns JSON at `/manus-routes.json`.
+- Open gates are authenticated typed read-only provider adapters with provenance/freshness/divergence evidence, then a real Elixir-to-Rust simulation integration. No live provider credentials were supplied.
+
+`docs/RAFT_BFT_WEBAUTHN_PRESENTATION_SCRIPT.md` is the ten-slide presentation narrative for the 3-node Raft to 7-node BFT migration and user-only WebAuthn reversal. It explicitly separates the 20/20 protocol-state simulator result from the still-open real WebAuthn, canonical CBOR, ES256, quorum-certificate, and end-to-end acceptance gates.
+
 ## 12. Decision log
 
 | Date | Decision | Reason |
