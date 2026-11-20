@@ -369,6 +369,25 @@ This is a reference implementation, not the production registry. It is process-l
 4. Add operation-specific intent-footprint tests for every row in the verification matrix, including simulation-to-signing and signing-to-broadcast quarantine races.
 5. Implement the three vaults as separate authority boundaries and prove that agents cannot reach the parent wallet or Financial Cold Vault.
 
+### Migration, reversal, deck, and Elixir management work — 2026-11-20
+
+The following artifacts were added as the next implementation gates:
+
+- `docs/MIGRATION_RAFT_TO_BFT_RUNBOOK.md` defines the controlled 3-node Raft to 7-node BFT migration. It preserves monotonic versions, uses 3→5→7 membership phases, requires dual-certificate overlap, fences Raft-only paths, and treats rollback as a freeze/protocol transition rather than a registry-version rewind.
+- `docs/WEBAUTHN_ACCEPTANCE_CHECKS.md` turns the eight remaining cryptographic/integration requirements into acceptance gates with threat, method, evidence, criteria, and owners. The existing 20-vector simulator remains protocol-state evidence only; it does not close real WebAuthn, canonical encoding, certificate, or end-to-end gates.
+- `docs/DECK_STRUCTURE_AND_NOTES_REVIEW.md` reviews all ten slide roles and notes 1–5 against the current architecture. It found the structure accurate and ready for technical review, with slide 5 the main pacing/density risk; no slide-order change is required.
+
+The first Elixir management-plane slice now exists under `elixir/wall3t_orchestrator`:
+
+- OTP supervision for agent registry, dynamic agent supervisors, audit log, quarantine projection, run history, and Rust-client stub;
+- supervised agent lifecycle with pause, resume, revoke, and kill terminal states;
+- immutable versioned flow definitions with SHA-256 content hashes and footprints;
+- expiring scoped capability tokens, independent budgets, deterministic scheduler, bounded retry backoff, and idempotency-keyed append-only run history;
+- fail-closed quarantine freshness barrier and deny projection before submitting opaque intents;
+- explicit `Wall3t.WalletCore.Client` boundary; Elixir cannot sign or broadcast and the Rust core remains authoritative.
+
+Verification on 2026-11-20: `mix test` passes 9 tests with 0 failures. This is a reference management layer; durable run history, authenticated service transport, production checkpoint verification, and real Rust adapter integration remain open gates.
+
 ### Production registry and reversal protocol design — 2026-11-20
 
 Two design documents now specify the path from the verified reference to production. They are design artifacts; the corresponding services are not implemented.

@@ -24,3 +24,6 @@ data/*.db
 
 # Generated review packages and deck exports
 dist/
+
+# Elixir/Mix build artifacts
+**/_build/
