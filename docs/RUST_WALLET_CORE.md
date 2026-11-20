@@ -78,9 +78,9 @@ Integration tests in `tests/quarantine_races.rs` (9) exercise the public API onl
 ## Deliberate limits
 
 - No chain adapter, RPC client, or real signing exists here. `BroadcastReceipt.transaction_id` is synthetic.
-- No persistence, replication, or signature verification on registry records yet; those belong to the production adapter and are the next gate.
+- No persistence, replication, or signature verification on registry records yet; those belong to the production adapter and are the next gate. The replacement design, including quorum commit, signed checkpoints, and read barriers, is in `docs/PRODUCTION_REGISTRY_ARCHITECTURE.md`.
 - Address normalization is caller-supplied. Production must canonicalize per chain.
-- The registry does not yet enforce that an agent may not reverse its own report beyond the type-level requirement for user hardware authorization; the production service must authenticate that assertion cryptographically.
+- The registry does not yet enforce that an agent may not reverse its own report beyond the type-level requirement for user hardware authorization; the production service must authenticate that assertion cryptographically. The WebAuthn/FIDO2 protocol for that check is in `docs/QUARANTINE_REVERSAL_CRYPTO_PROTOCOL.md`.
 - Discovery and bootstrap workers are not implemented; when they are, they must submit `TxIntent` values rather than calling a signer directly.
 
 ## Running it

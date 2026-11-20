@@ -1,159 +1,176 @@
-# BootStrap Wall3t — Three-Vault and Global Quarantine Presentation Script
+# BootStrap Wall3t — Detailed Ten-Slide Presentation Script
 
-**Format:** speaker script / presentation notes
-**Audience:** technical, security, and product reviewers
-**Purpose:** explain how full autonomous agent execution coexists with strict custody boundaries and a global automatic blacklist
+**Deck:** `BootStrap Wall3t — Three Vaults & Global Quarantine`
+**Audience:** technical, security, product, and implementation reviewers
+**Review date:** 2026-11-20
+**Purpose:** explain the full-autonomy operating model, three-vault architecture, global quarantine invariant, Rust implementation draft, production registry target, and hardware-authorized reversal protocol.
 
-## Opening — The operating model
+This script is deliberately aligned to the ten slides in the deck. Speaker notes are also attached to the Slides resource; this document is the durable version-control artifact for the narrative.
 
-BootStrap Wall3t is an automation wallet first. The user does not approve every transaction and does not sit in front of the system supervising ordinary execution.
+## Slide 1 — BootStrap Wall3t: three vaults, one global deny state
 
-The user creates or links wallets, funds agent wallets, installs policies and strategy documents, and chooses what authority each agent receives. After that, agents operate autonomously inside their own funded-wallet boundaries.
+**Core message:** BootStrap Wall3t is an automation wallet with separated custody and an automatic global deny mechanism.
 
-The parent wallet is the funding and supervisory authority. An agent can use the funds it has been given, but it cannot pull from, borrow from, or derive authority from the parent wallet. The user has visibility into the agent wallets and retains the ability to configure, fund, pause, revoke, or replace authority.
+BootStrap Wall3t is not a manually supervised trading console. The product is full autonomous execution inside user-authored operating policies. The user creates or links wallets, funds agent wallets intentionally, installs policies and strategy packages, and then lets agents operate without a transaction-by-transaction approval prompt.
 
-The architecture is built around three vaults and one global quarantine system.
+The architecture must still answer two security questions. First, how do we keep an autonomous agent from reaching the parent wallet or long-term cold assets? Second, how do we ensure that a bad token, contract, deployer, pair, provider, or strategy family discovered by one wallet is denied everywhere else without relying on agent-to-agent communication?
 
-## Section 1 — Structural overview
+The answer is three vaults and one global quarantine state. The three vaults separate credentials, automation documents, and long-term financial custody. The quarantine state is enforced below the workflow layer at the Rust wallet-core trust boundary.
 
-The system has four important planes.
+This deck separates what the architecture requires, what the Rust reference now proves, and what remains to be built for production.
 
-First is the user and extension plane. This is where the user creates wallets, funds agents, installs policies, reviews activity, and observes results. It is not a key store and it is not a transaction approval queue.
+**Transition:** Start with the autonomy boundary, because this system is not designed around approval prompts.
 
-Second is the automation plane. Elixir supervises agent processes, schedules loops, executes workflows, handles retries, runs discovery, and loads approved automation documents.
+## Slide 2 — Full autonomy is the product boundary
 
-Third is the wallet trust plane. Rust receives typed intents, resolves chain context, checks policy and quarantine state, constructs and signs transactions, and submits them through validated chain adapters.
+**Core message:** The product’s human-in-the-loop requirement is policy authorization, not continuous supervision.
 
-Fourth is the custody plane. The three vaults separate credentials and signing material, automation documents, and long-term financial assets.
+The first principle is autonomous execution. Once an agent wallet is funded and its policy is active, the agent can trade, transfer, bootstrap, rebalance, discover targets, and retry scheduled workflows without waiting for a human click.
 
-The key rule is that the automation plane can request actions, but only the wallet trust plane can decide whether an action is executable.
+The second principle is user-authored policy. The user decides the operating envelope: asset scope, chain scope, contract scope, budgets, schedule, venue, slippage, and emergency behavior. These are machine-enforced definitions. They are not a platform-generated approval queue.
 
-## Section 2 — The Secrets Vault
+The third principle is one-way observation. The parent wallet can see agent balances, activity, performance, policy versions, and events. The observation relationship does not give the agent a path back into the parent wallet.
 
-The Secrets Vault contains material that can authenticate, sign, unlock, or impersonate something.
+The fourth principle is the global deny state. Agents can report bad entities, and the user can report or review them. Once committed, the quarantine overrides local strategy permissions, discovery results, cached quotes, allowlists, and templates.
 
-That includes user and agent private keys, seed phrases, mnemonics, API keys, OAuth tokens, SSH keys, certificates, webhook secrets, signing keys, and authentication credentials.
+Agents may lose every cent held in their own wallets. That risk is intentionally different from allowing an agent to borrow from or debit the parent wallet. Autonomy is broad inside the agent wallet and sharply bounded at the custody edge.
 
-The vault does not expose these values to the browser extension, to ordinary agent processes, or to the Elixir orchestrator. The Rust wallet boundary receives an opaque signing capability or invokes a vault-backed operation without releasing raw key material.
+**Transition:** Those principles become concrete when we separate the UI, automation, wallet trust, and custody planes.
 
-This separation is important because an automation agent may need to use a signer, but it does not need to know the private key. The agent requests an operation. The wallet core validates the operation, applies policy and quarantine checks, and then performs the protected signing action.
+## Slide 3 — Four planes, one trust boundary
 
-The Secrets Vault is therefore a credential boundary, not an automation database.
+**Core message:** Workflows can request actions, but only Rust wallet core can authorize execution.
 
-## Section 3 — The Automations Vault
+The TypeScript extension is the user-facing configuration and visibility plane. It authors policies, displays discovery results, shows simulations and history, and exposes the one-way mirror. It does not store seeds and it is not a per-transaction approval queue.
 
-The Automations Vault contains the documents and configuration that tell agents what to do.
+The Elixir runtime is the automation plane. It supervises long-lived agents, schedules loops, retries workflows, runs discovery, and loads strategy documents. It receives opaque identifiers and scoped capabilities. It must not receive raw keys or call a signer directly.
 
-It stores policies, policy versions, strategy capsules, document packages, automation loops, schedules, triggers, retry behavior, workflow definitions, discovery rules, prompts, templates, operating modes, and circuit-breaker configuration.
+The Rust wallet core is the trust boundary. It receives a typed intent, derives the full intent footprint, reads the authoritative quarantine state, checks policy, simulates, signs through an opaque signer, and performs the final broadcast gate.
 
-These documents are executable instructions only after they are associated with a specific wallet, agent, scope, and version. Every executable strategy or policy must identify its version and content hash so that the wallet can determine exactly what the user authorized.
+The custody plane contains the three vaults. The Secrets Vault exposes protected signing operations. The Automations Vault stores non-signing policy and strategy material. The Financial Cold Vault is a user-side hardware-backed store outside agent authority.
 
-The Automations Vault cannot sign, unlock the parent wallet, or grant access to the cold financial vault. A document can request an action, but it cannot bypass Rust policy evaluation or the global quarantine system.
+This layering matters because a new workflow should inherit the quarantine guard automatically. If the guard lives only in a swap helper, the next bridge, staking, bootstrap, or discovery feature can accidentally bypass it.
 
-This makes autonomous operation practical without turning configuration storage into a source of unrestricted financial authority.
+**Transition:** The first vault is the credential boundary: anything capable of authenticating or signing belongs there.
 
-## Section 4 — The Financial Cold Vault
+## Slide 4 — Secrets Vault
 
-The Financial Cold Vault is for assets the user intends to keep outside the automation float.
+**Core message:** Agents can request signing operations without receiving key material.
 
-It is user-wallet-side custody, not agent custody. It may hold long-term crypto, supported fiat or fiat claims, and semi-flexible staking positions. Keys are generated and held through hardware-backed custody and user-controlled authorization.
+The Secrets Vault contains user and agent private keys, mnemonics, API keys, OAuth tokens, SSH keys, certificates, webhook secrets, and other authentication or signing material.
 
-Agents cannot access the cold vault, initiate withdrawals, accelerate a delay, cancel a withdrawal, or redirect its destination. They may see only the balance or public position data that the user chooses to expose through the supervisory mirror.
+The allowed access pattern is deliberately narrow. The Rust wallet boundary invokes an opaque signer operation or a scoped credential adapter. The agent sees a typed result, not a private key. Elixir sees an opaque capability, not a mnemonic. The browser extension sees public addresses, policy decisions, simulations, receipts, and audit records, not raw vault contents.
 
-Moving value out of cold storage requires a hardware-backed user authorization, destination verification, an adjustable time delay, a cancellation window, and an immutable audit record.
+The right column is as important as the contents column. The vault must never expose raw credentials to UI code or ordinary agent processes. It must never treat an automation document as authority to unlock the parent wallet. It must never reuse a service API token as wallet-signing authority.
 
-The delay applies whether the destination is a user hot wallet, an agent wallet, a bank, or another approved external destination.
+The Rust draft already reflects this direction through the `OpaqueSigner` trait. The test signer is deterministic and synthetic. It is there to prove ordering, not to be shipped as cryptography.
 
-The purpose of this vault is not to supervise agent trading. Agents can be fully autonomous with money already placed in their own wallets. The cold vault simply remains outside their authority.
+Production work still needs a real Secrets Vault adapter, hardware-backed signer boundaries, reviewed derivation, memory handling, and removal of the Python mnemonic-in-request path.
 
-## Section 5 — Agent wallet autonomy
+**Transition:** Credentials tell the system how to authenticate. The next vault tells it what the automation is allowed to attempt.
 
-An agent wallet is an autonomous operating environment funded by the user.
+## Slide 5 — Automations Vault
 
-The user attaches a policy, strategy, document set, and operating configuration. The agent can then trade, rebalance, transfer, bootstrap funds, run discovery-triggered actions, and retry scheduled workflows without a transaction-by-transaction approval prompt.
+**Core message:** Automation documents define behavior but cannot manufacture financial authority.
 
-The user-authored policy defines the operating envelope. Any limits are selected by the user; they are not a platform-imposed requirement to approve ordinary transactions.
+The Automations Vault stores policies and policy versions, strategy capsules, document packages, schedules, triggers, retry behavior, workflow definitions, discovery rules, prompts, templates, and circuit-breaker configuration.
 
-The non-negotiable boundary is that autonomy applies to funds already held by the agent wallet. The agent cannot extend its reach into the parent wallet or Financial Cold Vault.
+Every executable package needs a wallet or agent scope, a version, and a content hash. That lets wallet core determine which exact policy and strategy were active when an intent was produced.
 
-## Section 6 — Global automatic quarantine
+The boundary is non-signing. A document can say, “run this strategy on this schedule,” but it cannot unlock the parent wallet, reach the Financial Cold Vault, or bypass the Rust policy and quarantine checks. The Elixir runtime can orchestrate the document, but the generated action still becomes a typed intent and passes through the same trust boundary.
 
-The global blacklist is a shared deny system covering the user wallet and every linked agent wallet.
+This structure supports automation without turning configuration storage into an unrestricted treasury. It also gives us a clean place to invalidate strategy, discovery, quote, and template caches when the registry version changes.
 
-If an agent or the user discovers a bad coin, token, contract, deployer, pair, provider, or strategy family, the discovering wallet submits a quarantine report. No agent-to-agent conversation or approval is required.
+The production registry design adds a signed checkpoint and versioned state root to this picture. A strategy activation records the registry version it saw. If the registry advances, the old activation decision is stale and must be rebuilt.
 
-The quarantine service creates a new versioned deny state. Linked wallets receive the deny state through the authoritative registry and invalidate positive caches. Every wallet-core write path checks the current quarantine version before it can proceed.
+**Transition:** The third vault is intentionally outside the automation float and has a different release protocol.
 
-Only the user can reverse a quarantine. Agents can report and activate a quarantine, but they cannot delete it, weaken it, expire it, or override it.
+## Slide 6 — Financial Cold Vault
 
-A reversal requires user authorization, and where configured hardware-backed authorization, evidence review, a new registry version, and an audit event. Reversal does not silently restore old allow decisions.
+**Core message:** Long-term user assets remain hardware-backed and unavailable to agents.
 
-## Section 7 — What the quarantine check covers
+The Financial Cold Vault holds assets the user intends to keep outside the automation float. That can include long-term crypto, supported fiat or fiat claims, and carefully modeled semi-flexible staking positions.
 
-The check is not limited to swaps.
+Keys are generated and held through hardware-backed custody. Agents cannot initiate, accelerate, cancel, or redirect a cold-vault withdrawal. They may see permitted balance or public position data through the one-way supervisory mirror, but they do not get a withdrawal capability.
 
-For native transfers it checks the chain, destination, and relevant policy scopes.
+A withdrawal begins with user authorization, verifies the destination, starts an adjustable delay and cancellation window, and ends with an immutable audit record. The destination can be a hot wallet, an explicitly approved agent wallet, a bank, or another user-approved endpoint. The delay applies to crypto and fiat destinations.
 
-For token transfers it checks the token, recipient, deployer where known, and destination contract.
+The cold vault is not a mechanism for supervising autonomous trading. The user funds agent wallets intentionally and agents can operate autonomously with those funds. The cold vault simply remains outside their authority even if an agent has broad authority over its own wallet.
 
-For approvals and permits it checks the token, spender, operator, typed-data domain, and chain.
+This separation must eventually be enforced as a separate principal and API, not just a different folder in a common database.
 
-For swaps it checks both assets, routers, pools, callbacks, dependencies, and deployers.
+**Transition:** Now we can look at the system-wide response when any wallet discovers a bad entity.
 
-For bridges it checks source and destination assets, bridge contracts, relayers, and destination contracts.
+## Slide 7 — Global quarantine: one deny state
 
-For staking it checks the staking contract, token, validator or operator, and reward contracts.
+**Core message:** A single committed report becomes a versioned deny state for every linked wallet.
 
-For agent-to-agent transfers it checks the destination agent wallet, asset, chain, and any receiving contract.
+The process begins when an agent or the user identifies a bad entity. The entity can be a token, contract, deployer, pair, chain, provider, wallet, or strategy family. A report includes a canonical identifier, reason, evidence references, reporter identity, and registry version context.
 
-For Lightning it checks the invoice context, destination, provider, and payment scope before sending.
+The report is submitted to the authoritative registry. In the production design, a quorum-replicated append-only log commits the command. The committed log index becomes the monotonic registry version. The registry then emits a signed checkpoint containing the version, log head hash, state root, and quorum certificate.
 
-For bootstrap and discovery workflows it checks every generated intent before signing or sending. A discovery worker or bootstrap worker never gets a bypass path.
+Linked wallets receive the new state through a subscription or certified read. They invalidate positive allowlist, quote, route, discovery, and strategy caches. They do not need to message one another.
 
-For strategy activation it checks the strategy capsule, referenced chains, assets, venues, and contracts, then checks every action produced by the strategy.
+The wallet core fails closed when it cannot prove a current registry state. A stale but validly signed checkpoint proves what the registry said at an earlier time; it does not prove that the checkpoint is current. That is why final sign and broadcast gates require a read barrier or equivalent freshness certificate.
 
-## Section 8 — The check sequence
+Only the user can reverse the entry. That reversal is a control-plane action requiring the hardware authorization protocol described outside this deck.
 
-The wallet core creates an intent footprint containing every relevant entity: chains, assets, contracts, spenders, venues, providers, operators, and destinations.
+**Transition:** The deny state matters only if every value-moving and authority-creating operation consumes it.
 
-The QuarantineGuard evaluates that footprint against the current registry version.
+## Slide 8 — Quarantine is below every operation
 
-The sequence is:
+**Core message:** One shared intent footprint and guard cover transfers, permissions, DeFi, payments, and automation activation.
 
-1. A workflow or agent submits a typed intent.
-2. The wallet core derives the complete intent footprint.
-3. The current quarantine state is loaded and verified.
-4. A stale, unavailable, or unverifiable registry fails closed for affected writes.
-5. The action is simulated and the result is checked against the current state.
-6. Quarantine is checked again immediately before signing.
-7. The transaction is signed only if the deny state is still valid.
-8. The broadcast path performs the final check where the chain adapter supports it.
-9. The receipt and registry version are written to the audit trail.
+Native and token transfers check the chain, asset, recipient, contract, and deployer context. Approvals and permits check the token, spender, operator, typed-data domain, and chain. A swap checks both assets, the router, pools, callbacks, dependencies, and deployers.
 
-This prevents an agent from acting on an old positive decision after another wallet has quarantined the asset.
+Bridges add source and destination assets, bridge contracts, relayers, and destination contracts. Staking adds the staking contract, validator or operator, token, and reward contracts. Lightning checks the invoice context, provider, destination, and asset scope before sending.
 
-## Section 9 — Why agents do not need to communicate
+Agent-to-agent transfer, bootstrap methods, and discovery-triggered activation are not privileged bypass paths. Their generated intents include the destination and every entity they can touch. Strategy activation checks the strategy capsule, referenced venues and assets, then checks every action the strategy generates.
 
-Agent-to-agent discussion is not the enforcement mechanism.
+The Rust reference represents this with `IntentFootprint`. It sorts and deduplicates the complete entity set, then applies one guard. The same guard is used by all eleven operation kinds in the tests.
 
-The enforcement mechanism is a shared authoritative deny state with versioning and fail-closed reads. A reporting agent submits a quarantine event once. The wallet-core guard in every linked wallet consumes the resulting deny state.
+The production adapter must add chain-native canonicalization, real ABI and typed-data decoding, and dependency discovery. The architectural rule does not change: no operation gets a special path around the guard.
 
-This means an agent does not need to notify every other agent directly, and a compromised or offline agent cannot negotiate around the blacklist.
+**Transition:** The most important tests are not happy-path swaps; they are races between registry change and execution.
 
-The quarantine is enforced at the signing boundary, below the workflow layer. That makes it apply to future agent types and new automation templates automatically, provided they submit typed intents through the wallet core.
+## Slide 9 — Race tests close the time-of-check gap
 
-## Section 10 — What is implemented versus planned
+**Core message:** A registry update between simulation, signing, and broadcast invalidates the action.
 
-The architecture and acceptance contract are now defined, but the current repository still contains a Python prototype rather than the finalized implementation.
+At simulation, wallet core derives the footprint and records the certified registry version in a ticket. At signing, it reads the registry again. If the version changed, the ticket is stale even if the newly added quarantine targets an unrelated entity. That conservative invalidation makes positive decisions non-reusable across registry versions.
 
-The existing prototype has a local file-backed threat registry and a swap-focused check. It does not yet provide the versioned authoritative registry, user-only reversal, three separate vault principals, Rust wallet-core enforcement, or complete operation coverage described here.
+Signing also rechecks the footprint. This catches a quarantine that targets the operation directly. Broadcast performs a final read barrier and repeats both checks. A signed payload is not automatically safe to release if the global deny state moved after signing.
 
-Therefore, the next engineering milestone is not to add more strategy integrations. It is to implement the wallet graph, three-vault access matrix, QuarantineRegistry, QuarantineGuard, and the operation coverage tests.
+The verified Rust suite covers concurrent quarantine-versus-signing and quarantine-versus-broadcast, reversal invalidating older tickets, router-only quarantine blocking a clean-token swap, an unavailable registry failing closed, and cross-wallet propagation over a shared registry.
 
-## Closing
+The next production test layer injects failures into quorum reads, leader changes, replica lag, signed-checkpoint rotation, and network partitions. The acceptance criterion remains the same: a committed deny state must beat any stale positive decision, or the write must stop.
 
-BootStrap Wall3t combines full autonomous execution with strict custody separation.
+**Transition:** The result is a clear split between what is now executable and what remains a production gate.
 
-The user authorizes agents by funding their wallets and assigning policies. The agents can operate independently without emotional or per-transaction interference. The parent wallet remains outside their reach, the cold financial vault remains user-controlled, and the global quarantine system automatically blocks a discovered bad asset across the entire linked wallet group.
+## Slide 10 — Design aligned; implementation gates remain
 
-That is the core structure: autonomous agents, separated custody, one-way supervision, and a user-controlled global deny switch.
+**Core message:** The reference proves the trust ordering; the production store and hardware protocol are the next security gates.
+
+The architecture is aligned with full autonomy. The Rust reference now proves the versioned registry contract, shared intent guard, stale-ticket behavior, user-only reversal shape, and race-test structure.
+
+The reference is not a production registry. It is process-local, unsigned, unpersisted, and has no chain adapter. It cannot survive a node crash, prove quorum, authenticate a real hardware credential, or establish freshness across replicas.
+
+The next gates are concrete. First, freeze the wallet graph, vault access matrix, and canonical entity identifiers. Second, replace the in-memory state with a quorum-committed log, durable state materializer, signed checkpoints, and read barriers. Third, implement the WebAuthn/FIDO2 hardware reversal protocol with expected-head binding and one-time challenges. Fourth, attach the guard to a real EVM testnet adapter and signer boundary. Fifth, run fault-injection and recovery tests in CI before wiring the extension and Elixir runtime to production paths.
+
+The central product promise remains unchanged: agents operate autonomously with the funds they hold, the parent and cold vault remain outside their authority, and a single user- or agent-reported bad entity can become a global deny state without emotional or per-transaction interference.
+
+**Closing line:** Autonomous agents, separated custody, one-way observation, and a user-controlled global deny switch are the product architecture. Durable quorum state and hardware-authorized reversal are what make that architecture production-grade.
+
+## Reviewer questions to pre-empt
+
+**Does a quarantine report require a human approval?** No. Agents can report and activate quarantine automatically. Human hardware authorization is required only to reverse an active quarantine.
+
+**Does a registry outage permit old trades to continue?** No for value-moving writes. Read-only dashboards may use the last verified checkpoint, but signing and broadcast require a current read barrier and fail closed otherwise.
+
+**Does a signed snapshot prove that it is current?** No. It proves authenticity of a historical state. The production design separates state authenticity from freshness and requires a quorum read barrier for final writes.
+
+**Can an agent reverse its own quarantine?** No. The reversal command requires a verified user hardware credential, expected registry head, evidence review hash, and a quorum commit.
+
+**Does reversal restore old approvals or strategy decisions?** No. Reversal advances the registry version and invalidates all older tickets and positive caches. New policy and simulation checks are required.
+
+**What is still missing?** Durable consensus-backed storage, signed checkpoint verification, real hardware authorization, chain adapter integration, vault principals, and fault-injection evidence.

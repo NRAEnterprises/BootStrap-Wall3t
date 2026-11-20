@@ -369,6 +369,32 @@ This is a reference implementation, not the production registry. It is process-l
 4. Add operation-specific intent-footprint tests for every row in the verification matrix, including simulation-to-signing and signing-to-broadcast quarantine races.
 5. Implement the three vaults as separate authority boundaries and prove that agents cannot reach the parent wallet or Financial Cold Vault.
 
+### Production registry and reversal protocol design — 2026-11-20
+
+Two design documents now specify the path from the verified reference to production. They are design artifacts; the corresponding services are not implemented.
+
+`docs/PRODUCTION_REGISTRY_ARCHITECTURE.md` defines the replacement for `InMemoryQuarantineRegistry`:
+
+- an authenticated Rust registry API in front of a quorum-replicated append-only log (3 nodes minimum, 5 normal);
+- deterministic state materialization, a Merkle state root, and an immutable content-addressed evidence store;
+- signed checkpoints carrying cluster id, version, previous checkpoint hash, log head hash, state root, and a quorum certificate;
+- a wallet-core read barrier that separates checkpoint authenticity from checkpoint freshness, because a signed snapshot proves what the registry said, not that it is current;
+- stage rules: simulation may use a certified snapshot, signing and broadcast require a current barrier, and subscriptions invalidate positive caches without ever authorizing a write;
+- explicit outage, leader-loss, divergence, key-compromise, and restore behavior, with final writes blocked rather than degraded to a stale positive decision;
+- migration in shadow mode against the reference, plus release gates for crash recovery, split-brain, stale checkpoint, idempotency, and fault injection.
+
+`docs/QUARANTINE_REVERSAL_CRYPTO_PROTOCOL.md` defines user-only reversal:
+
+- a dedicated WebAuthn/FIDO2 administrator credential using ES256/P-256, separate from wallet signing keys and registry signing keys;
+- enrollment with attestation policy, credential record, and recovery credential requirements;
+- a one-time, short-lived challenge bound to `authorization_id`, `quarantine_id`, `active_record_hash`, `expected_registry_version`, `expected_state_root`, and `evidence_review_hash`;
+- a canonical CBOR authorization digest with protocol domain separation, plus full server-side WebAuthn verification of origin, RP id hash, challenge, UV/UP flags, credential status, signature, and counter;
+- an atomic `ReverseQuarantine` command with idempotent `command_id` and `expected_version`, committing `ACTIVE(N) -> REVERSED(N+1)` through the quorum log;
+- audit fields that record hashes and verification outcomes rather than raw assertions or secrets;
+- replay, rollback, phishing, credential-loss, and credential-compromise handling, with 20 required protocol test vectors.
+
+Neither document authorizes an agent to reverse a quarantine, reach the parent wallet, or bypass the Rust guard. Reversal remains an exceptional user control-plane action, not a per-transaction approval.
+
 ## 12. Decision log
 
 | Date | Decision | Reason |
