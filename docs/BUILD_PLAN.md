@@ -17,7 +17,7 @@ The product must preserve these boundaries:
 - Agents submit explicit, typed intents; they do not receive raw seed material or unrestricted signer access.
 - The Rust wallet core is the signing and policy trust boundary.
 - The Elixir runtime supervises workflows and long-lived agents but cannot access raw keys.
-- The TypeScript extension is a presentation and user-consent surface, not a secret store.
+- The TypeScript extension is a presentation, policy-authoring, and configuration surface, not a secret store or per-transaction approval queue.
 - Third-party RPCs, explorers, token lists, bridges, notification providers, and dApps are untrusted inputs.
 - Unknown contracts, undecodable signatures, ambiguous chain context, stale quotes, and unverifiable state fail closed.
 
@@ -94,7 +94,7 @@ The domain model must include:
 - `AgentWallet`: a derived or independently provisioned signer identity linked to one user wallet.
 - `AgentAssignment`: many-to-many relationship between agents, wallets, workflows, and scopes.
 - `Capability`: explicit machine-enforced operating authority such as discovery, quote, simulation, transfer, swap, staking, bootstrap, or template execution.
-- `Policy`: chain, contract, asset, amount, frequency, slippage, fee, time-window, and approval constraints.
+- `Policy`: chain, contract, asset, amount, frequency, slippage, fee, time-window, and execution-mode constraints. Any limits are user-authored policy parameters; they are not per-transaction approval prompts or mandatory platform loss caps.
 - `Revocation`: immediate disablement of an agent, capability, session, template, contract, provider, or chain.
 - `AuditEvent`: append-only record of who/what requested, simulated, approved, signed, broadcast, or revoked an action.
 The user authorizes autonomy by creating/funding an agent wallet and attaching a policy, strategy, and operating budget. An agent may autonomously use all assets held in its own wallet within the active policy; no per-transaction approval is required. An agent can never debit, borrow from, or derive authority from the parent wallet. Multiple agents may be assigned to the same wallet only through explicit shared-wallet policy semantics and independent accounting of each agent's actions.
@@ -205,9 +205,9 @@ Each phase has an exit gate. A phase is not complete because code compiles; its 
 
 ### Phase 5 — Simulation, approvals, and clear signing
 
-**Deliverables:** independent simulation; asset-flow diff; calldata and EIP-712 decoder; exact approvals by default; Permit/Permit2/setApprovalForAll handling; approval inventory/revocation; unknown-contract default deny; high-value human gate; post-execution reconciliation.
+**Deliverables:** independent simulation; asset-flow diff; calldata and EIP-712 decoder; exact approvals by default; Permit/Permit2/setApprovalForAll handling; approval inventory/revocation; unknown-contract default deny; policy-authorized autonomous execution; post-execution reconciliation. An undecodable operation is rejected by the wallet core; it is not converted into a human approval prompt.
 
-**Exit gate:** TX1/TX2 and CAT4 critical controls have executable tests; malicious fixtures cover selector collisions, hidden recipients, stale permits, changed state between simulation and execution, and chain replay.
+**Exit gate:** TX1/TX2 and CAT4 critical controls have executable tests; malicious fixtures cover selector collisions, hidden recipients, stale permits, changed state between simulation and execution, chain replay, and quarantine races; approved policies execute without per-action prompts.
 
 ### Phase 6 — Elixir automation runtime and templates
 
@@ -219,9 +219,9 @@ Initial templates should be policy-authorized and autonomous: balance/position m
 
 ### Phase 7 — Browser extension and user consent UX
 
-**Deliverables:** Manifest V3 extension; isolated UI/background messaging; origin and dApp session verification; wallet/agent views; discovery view; policy editor; simulation/approval screens; session revocation; recovery warnings; safe notifications.
+**Deliverables:** Manifest V3 extension; isolated UI/background messaging; origin and dApp session verification; wallet/agent views; discovery view; policy editor; policy/strategy activation screens; simulation history; session revocation; recovery warnings; safe notifications. The extension does not become a per-transaction approval queue.
 
-**Exit gate:** VIS2/VIS3 critical controls and CAT2 UI controls are tested; extension storage contains no seed/private key; content-script messages are origin-validated; unknown or undecodable requests cannot be approved silently.
+**Exit gate:** VIS2/VIS3 critical controls and CAT2 UI controls are tested; extension storage contains no seed/private key; content-script messages are origin-validated; unknown or undecodable requests cannot be executed or silently converted into an approval path.
 
 ### Phase 8 — Discovery, visibility, and target onboarding
 
@@ -333,7 +333,29 @@ The first autonomous trading vertical slice should therefore be: one testnet cha
 12. **Make legal scope a product decision.** Define intended jurisdictions and supported features before adding swaps, staking, ramps, advisory language, or autonomous trading; obtain qualified counsel review before public release.
 13. **Keep the name and product identity stable.** Use “BootStrap Wall3t” consistently in the repository, extension manifest, package names where practical, and user-facing documentation; avoid letting the older “Sats-Stack” prototype branding become the product identity.
 
-## 11. Decision log
+## 11. Dated architecture verification — 2026-11-20
+
+### Verdict
+
+- **Full-autonomy alignment:** PASS at the design level. Policies are machine-enforced operating definitions; ordinary execution does not require per-transaction approval or continuous human supervision.
+- **Vault-boundary alignment:** PASS at the design level; NOT IMPLEMENTED in the current repository. The finalized Secrets Vault, Automations Vault, and user-only Financial Cold Vault require separate principals, processes, APIs, and audit scopes, not merely separate directories.
+- **Global quarantine alignment:** PASS at the design level; NOT IMPLEMENTED across the wallet core. The Python prototype has only a partial, local, swap-focused `ThreatRegistry` check.
+
+The current implementation remains a release blocker because it does not yet provide Rust wallet-core enforcement, a versioned authoritative quarantine registry, user-only reversal, signed replicated deny state or equivalent consistency, cache invalidation, or complete operation coverage.
+
+The required coverage includes native and token transfers, approvals, Permit/EIP-712, swaps, bridges, staking, Lightning payments, agent-to-agent transfers, bootstrap methods, strategy/template execution, discovery-triggered activation, and cold-vault withdrawal boundaries. Each operation must pass a shared quarantine guard at intent admission and again before signing; broadcast paths must perform a final check where supported. Stale, unavailable, or unverifiable quarantine state fails closed for affected writes.
+
+Required acceptance evidence is recorded in `docs/ARCHITECTURE_VERIFICATION.md`. The required presentation narrative is recorded in `docs/PRESENTATION_SCRIPT.md`. These files are design and verification artifacts; they do not substitute for implementation.
+
+### Required next gates
+
+1. Define the wallet graph, vault access matrix, canonical entity identifiers, and quarantine state machine in Rust-domain-compatible schemas.
+2. Implement `QuarantineRegistry` and `QuarantineGuard` below the agent workflow layer, with monotonic registry versions and typed fail-closed errors.
+3. Prove that one agent's quarantine blocks every linked wallet without agent-to-agent messaging and that only user/hardware authorization can reverse it.
+4. Add operation-specific intent-footprint tests for every row in the verification matrix, including simulation-to-signing and signing-to-broadcast quarantine races.
+5. Implement the three vaults as separate authority boundaries and prove that agents cannot reach the parent wallet or Financial Cold Vault.
+
+## 12. Decision log
 
 | Date | Decision | Reason |
 |---|---|---|
@@ -345,6 +367,6 @@ The first autonomous trading vertical slice should therefore be: one testnet cha
 | 2026-11-18 | Human-in-the-loop means policy authorization, not per-transaction approval | The product is an automation tool first; agents must operate autonomously within explicit user-defined limits |
 | 2026-11-18 | Autonomous execution is a first-class release track | Bounded autonomous trading, transfers, and bootstrap flows are core product behavior, not a deferred optional mode |
 
-## 12. Next implementation change
+## 13. Next implementation change
 
 The next coding change should add repository hygiene and the Phase 0 foundation: remove generated artifacts, establish a Rust workspace and pinned toolchains, add a control registry generator for the six YAML audits, add CI checks for secrets and forbidden prototype paths, and define the wallet-graph schema before implementing signing.
