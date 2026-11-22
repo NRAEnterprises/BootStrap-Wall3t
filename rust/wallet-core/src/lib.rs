@@ -9,6 +9,7 @@ use std::fmt;
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod authenticated;
 pub mod domain;
 pub mod persistence;
 pub mod wire;

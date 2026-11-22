@@ -477,3 +477,12 @@ The Phase 1 domain slice now has a dependency-free serialization and local durab
 - Focused tests cover wire repeatability/version tagging, material-change detection, journal round-trip/reopen, truncation rejection, and checksum rejection.
 
 This checkpoint is not a Phase 1 exit. The journal is local evidence infrastructure, not the replicated signed quarantine registry. Remaining gates include authenticated decoding/hash binding, wallet-graph repository APIs, Elixir transport adapters, cross-language vectors, vault access service integration, policy-document persistence, and authoritative quarantine propagation.
+
+
+## 15. Phase 2 authenticated decoding and hash binding checkpoint — 2026-11-22
+
+The first Phase 2 wallet-core trust-boundary slice is implemented in `rust/wallet-core/src/authenticated.rs`. It adds a versioned `BWAU` envelope around the exact `BW3C` canonical payload. The envelope binds record kind, signer, subject, registry version, expiry, nonce, and protocol domain. A dependency-free SHA-256 implementation produces the payload digest; the signed message includes the complete binding context and digest.
+
+Strict decoding is bounded and fail closed. It rejects unknown versions and kinds, invalid UTF-8, malformed lengths, oversized fields, trailing bytes, payload-header mismatches, empty signatures, invalid context, expired envelopes, and payload hash mismatches. Hash mismatch is checked before the injected `SignatureVerifier` is called. The verifier trait is deliberately an explicit production boundary: the current tests use only a test verifier and do not claim a production signature backend.
+
+Evidence: the Rust workspace passes 38 tests, `cargo fmt --all -- --check`, and `cargo clippy --workspace --all-targets -- -D warnings`. This checkpoint does not complete Phase 2; reviewed signature algorithms/key registry, replay and nonce persistence, cross-language vectors, authenticated typed transport decoders, and replicated authority integration remain open.
