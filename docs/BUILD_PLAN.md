@@ -486,3 +486,12 @@ The first Phase 2 wallet-core trust-boundary slice is implemented in `rust/walle
 Strict decoding is bounded and fail closed. It rejects unknown versions and kinds, invalid UTF-8, malformed lengths, oversized fields, trailing bytes, payload-header mismatches, empty signatures, invalid context, expired envelopes, and payload hash mismatches. Hash mismatch is checked before the injected `SignatureVerifier` is called. The verifier trait is deliberately an explicit production boundary: the current tests use only a test verifier and do not claim a production signature backend.
 
 Evidence: the Rust workspace passes 38 tests, `cargo fmt --all -- --check`, and `cargo clippy --workspace --all-targets -- -D warnings`. This checkpoint does not complete Phase 2; reviewed signature algorithms/key registry, replay and nonce persistence, cross-language vectors, authenticated typed transport decoders, and replicated authority integration remain open.
+
+
+## 16. Phase 2 Ed25519 signature backend and key registry checkpoint — 2026-11-22
+
+`rust/wallet-core/src/key_registry.rs` now provides an allowlisted Ed25519 verification backend backed by `ed25519-dalek`. `KeyRegistry` stores public verification keys only and binds every key to a unique key ID and signer identity. Key records include algorithm, activation time, optional expiry, and revocation state. Verification requires the exact envelope signer/key ID pair, an active non-revoked key, a valid Ed25519 public key, a 64-byte signature, and a valid signature over the complete Phase 2 binding message.
+
+The authenticated envelope now carries and signs the explicit key ID, making rotation deterministic rather than selecting an implicit current key. Registry registration rejects duplicate IDs and invalid identities/windows. Verification rejects missing keys, signer mismatches, revoked keys, not-yet-active keys, expired keys, malformed public keys, malformed signatures, and invalid signatures. The registry implements the existing `SignatureVerifier` trait using wall-clock validity and exposes `verify_at` for deterministic control-plane tests.
+
+The `ed25519-dalek` dependency is now pinned through the Rust lockfile. Validation evidence is 43 Rust tests (34 unit and 9 integration), clean formatting, clean clippy with warnings denied, and 9 Elixir tests. This does not complete Phase 2: durable key-registry persistence/atomic rotation, HSM or hardware-backed custody where required, replay/nonce persistence, cross-language vectors, and replicated-authority integration remain open.

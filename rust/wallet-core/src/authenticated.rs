@@ -12,6 +12,7 @@ pub const AUTH_VERSION: u16 = 1;
 const AUTH_MAGIC: &[u8; 4] = b"BWAU";
 const AUTH_DOMAIN: &str = "BOOTSTRAP-WALL3T/AUTHENTICATED-WIRE/V1";
 const MAX_SIGNER_LEN: usize = 256;
+const MAX_KEY_ID_LEN: usize = 256;
 const MAX_SUBJECT_LEN: usize = 512;
 const MAX_PAYLOAD_LEN: usize = 8 * 1024 * 1024;
 const MAX_SIGNATURE_LEN: usize = 16 * 1024;
@@ -29,6 +30,7 @@ pub struct BindingContext {
 pub struct AuthenticatedEnvelope {
     pub kind: u8,
     pub signer: String,
+    pub key_id: String,
     pub context: BindingContext,
     pub payload: Vec<u8>,
     pub payload_hash: [u8; 32],
@@ -78,29 +80,33 @@ impl std::fmt::Display for AuthError {
 impl std::error::Error for AuthError {}
 
 pub trait SignatureVerifier {
-    fn verify(&self, signer: &str, message: &[u8], signature: &[u8]) -> bool;
+    fn verify(&self, signer: &str, key_id: &str, message: &[u8], signature: &[u8]) -> bool;
 }
 
 impl AuthenticatedEnvelope {
     pub fn from_canonical<T: CanonicalWire>(
         signer: impl Into<String>,
+        key_id: impl Into<String>,
         context: BindingContext,
         payload: &T,
         signature: Vec<u8>,
     ) -> Result<Self, AuthError> {
         let payload = payload.canonical_bytes();
-        Self::from_payload(signer, context, T::KIND, payload, signature)
+        Self::from_payload(signer, key_id, context, T::KIND, payload, signature)
     }
 
     pub fn from_payload(
         signer: impl Into<String>,
+        key_id: impl Into<String>,
         context: BindingContext,
         kind: u8,
         payload: Vec<u8>,
         signature: Vec<u8>,
     ) -> Result<Self, AuthError> {
         let signer = signer.into();
+        let key_id = key_id.into();
         validate_signer(&signer)?;
+        validate_key_id(&key_id)?;
         validate_context(&context)?;
         validate_payload_header(kind, &payload)?;
         if payload.len() > MAX_PAYLOAD_LEN {
@@ -116,6 +122,7 @@ impl AuthenticatedEnvelope {
         Ok(Self {
             kind,
             signer,
+            key_id,
             context,
             payload,
             payload_hash,
@@ -130,6 +137,7 @@ impl AuthenticatedEnvelope {
         put_u16(AUTH_VERSION, &mut message);
         message.push(self.kind);
         put_str(&self.signer, &mut message);
+        put_str(&self.key_id, &mut message);
         put_str(&self.context.subject, &mut message);
         put_u64(self.context.registry_version, &mut message);
         put_u64(self.context.expires_at_unix, &mut message);
@@ -144,6 +152,7 @@ impl AuthenticatedEnvelope {
         now_unix: u64,
     ) -> Result<&[u8], AuthError> {
         validate_signer(&self.signer)?;
+        validate_key_id(&self.key_id)?;
         validate_context(&self.context)?;
         validate_payload_header(self.kind, &self.payload)?;
         if self.context.expires_at_unix <= now_unix {
@@ -155,7 +164,12 @@ impl AuthenticatedEnvelope {
         if self.signature.is_empty() {
             return Err(AuthError::SignatureMissing);
         }
-        if !verifier.verify(&self.signer, &self.signed_message(), &self.signature) {
+        if !verifier.verify(
+            &self.signer,
+            &self.key_id,
+            &self.signed_message(),
+            &self.signature,
+        ) {
             return Err(AuthError::SignatureRejected);
         }
         Ok(&self.payload)
@@ -163,6 +177,7 @@ impl AuthenticatedEnvelope {
 
     pub fn encode(&self) -> Result<Vec<u8>, AuthError> {
         validate_signer(&self.signer)?;
+        validate_key_id(&self.key_id)?;
         validate_context(&self.context)?;
         validate_payload_header(self.kind, &self.payload)?;
         if self.payload.len() > MAX_PAYLOAD_LEN || self.signature.len() > MAX_SIGNATURE_LEN {
@@ -179,6 +194,7 @@ impl AuthenticatedEnvelope {
         put_u16(AUTH_VERSION, &mut out);
         out.push(self.kind);
         put_str(&self.signer, &mut out);
+        put_str(&self.key_id, &mut out);
         put_str(&self.context.subject, &mut out);
         put_u64(self.context.registry_version, &mut out);
         put_u64(self.context.expires_at_unix, &mut out);
@@ -203,6 +219,7 @@ impl AuthenticatedEnvelope {
             return Err(AuthError::InvalidKind);
         }
         let signer = reader.string(MAX_SIGNER_LEN)?;
+        let key_id = reader.string(MAX_KEY_ID_LEN)?;
         let subject = reader.string(MAX_SUBJECT_LEN)?;
         let registry_version = reader.u64()?;
         let expires_at_unix = reader.u64()?;
@@ -224,6 +241,7 @@ impl AuthenticatedEnvelope {
             nonce,
         };
         validate_signer(&signer)?;
+        validate_key_id(&key_id)?;
         validate_context(&context)?;
         validate_payload_header(kind, &payload)?;
         if signature.is_empty() {
@@ -235,6 +253,7 @@ impl AuthenticatedEnvelope {
         Ok(Self {
             kind,
             signer,
+            key_id,
             context,
             payload,
             payload_hash,
@@ -256,6 +275,13 @@ pub fn payload_digest(kind: u8, payload: &[u8]) -> Sha256Digest {
 fn validate_signer(signer: &str) -> Result<(), AuthError> {
     if signer.is_empty() || signer.len() > MAX_SIGNER_LEN || signer.chars().any(char::is_control) {
         return Err(AuthError::InvalidField("signer"));
+    }
+    Ok(())
+}
+
+fn validate_key_id(key_id: &str) -> Result<(), AuthError> {
+    if key_id.is_empty() || key_id.len() > MAX_KEY_ID_LEN || key_id.chars().any(char::is_control) {
+        return Err(AuthError::InvalidField("key identifier"));
     }
     Ok(())
 }
@@ -476,7 +502,7 @@ mod tests {
 
     struct AcceptingVerifier;
     impl SignatureVerifier for AcceptingVerifier {
-        fn verify(&self, _signer: &str, _message: &[u8], signature: &[u8]) -> bool {
+        fn verify(&self, _signer: &str, _key_id: &str, _message: &[u8], signature: &[u8]) -> bool {
             signature == b"test-signature"
         }
     }
@@ -522,6 +548,7 @@ mod tests {
     fn authenticated_envelope_round_trips_and_verifies() {
         let envelope = AuthenticatedEnvelope::from_canonical(
             "rust-wallet-core",
+            "key-1",
             context(),
             &policy(),
             b"test-signature".to_vec(),
@@ -537,6 +564,7 @@ mod tests {
     fn tampered_payload_is_rejected_before_signature_verification() {
         let envelope = AuthenticatedEnvelope::from_canonical(
             "rust-wallet-core",
+            "key-1",
             context(),
             &policy(),
             b"test-signature".to_vec(),
@@ -558,6 +586,7 @@ mod tests {
     fn decoder_rejects_trailing_bytes_and_expired_context() {
         let envelope = AuthenticatedEnvelope::from_canonical(
             "rust-wallet-core",
+            "key-1",
             context(),
             &policy(),
             b"test-signature".to_vec(),
