@@ -10,6 +10,8 @@ use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod domain;
+pub mod persistence;
+pub mod wire;
 
 pub type RegistryVersion = u64;
 pub type ChainId = u64;

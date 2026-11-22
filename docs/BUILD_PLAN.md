@@ -465,3 +465,15 @@ The managed Web project at `/home/ubuntu/wall3t` now contains the first reviewab
 ## 13. Next implementation change
 
 The next coding change should add repository hygiene and the Phase 0 foundation: remove generated artifacts, establish a Rust workspace and pinned toolchains, add a control registry generator for the six YAML audits, add CI checks for secrets and forbidden prototype paths, and define the wallet-graph schema before implementing signing.
+
+
+## 14. Phase 1 persistence and canonical wire checkpoint — 2026-11-22
+
+The Phase 1 domain slice now has a dependency-free serialization and local durability foundation:
+
+- `rust/wallet-core/src/wire.rs` emits versioned `BW3C` canonical bytes with explicit enum tags, big-endian numeric fields, length-prefixed values, and deterministic `BTreeSet` ordering for assignments, funding authorizations, vault policies, automation policies, automation flows, and quarantine events.
+- `rust/wallet-core/src/persistence.rs` provides a typed append-only `DomainJournal`. Frames contain magic, version, record kind, payload length, checksum, and the exact canonical payload. Every append calls `sync_data` before returning.
+- Recovery fails closed on truncated lengths, invalid frame sizes, unknown magic, unsupported versions, payload-length mismatch, and checksum corruption. The typed append boundary accepts only Phase 1 contracts and therefore does not persist raw secrets.
+- Focused tests cover wire repeatability/version tagging, material-change detection, journal round-trip/reopen, truncation rejection, and checksum rejection.
+
+This checkpoint is not a Phase 1 exit. The journal is local evidence infrastructure, not the replicated signed quarantine registry. Remaining gates include authenticated decoding/hash binding, wallet-graph repository APIs, Elixir transport adapters, cross-language vectors, vault access service integration, policy-document persistence, and authoritative quarantine propagation.
