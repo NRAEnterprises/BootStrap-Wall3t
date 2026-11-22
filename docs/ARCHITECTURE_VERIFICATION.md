@@ -34,16 +34,16 @@ No production-readiness claim should be made until the implementation rows are b
 
 ### Update — 2026-11-20, Rust foundation drafted
 
-`rust/wallet-core` now implements the registry contract, entity scopes, intent footprint, and the three-stage trust pipeline. Verification: 21 passing tests (12 unit, 9 public-API integration) and a clean `cargo clippy --all-targets -- -D warnings` run. The status table above is superseded as follows:
+`rust/wallet-core` now implements the registry contract, entity scopes, intent footprint, three-stage trust pipeline, and the first Phase 1 domain-contract foundation. Verification: 28 passing tests (19 unit, 9 public-API integration) and a clean `cargo clippy --workspace --all-targets -- -D warnings` run. The status table above is superseded as follows:
 
 | Area | Architecture status | Executable implementation status |
 |---|---|---|
 | Full autonomous execution | Aligned | Pipeline supports it; no workflow runtime yet |
-| Parent-to-agent isolation | Specified | Not implemented |
-| Secrets Vault | Specified | Not implemented |
-| Automations Vault | Specified | Not implemented as an enforced boundary |
-| Financial Cold Vault | Specified | Not implemented |
-| Global automatic blacklist | Specified | Reference registry and guard implemented and tested; production store pending |
+| Parent-to-agent isolation | Specified | Phase 1 contract rejects agent-to-parent funding; persistent graph and service boundary pending |
+| Secrets Vault | Specified | Phase 1 policy validation rejects UI/Elixir/agent access; storage service pending |
+| Automations Vault | Specified | Phase 1 typed policy boundary exists; persistence and service enforcement pending |
+| Financial Cold Vault | Specified | Phase 1 policy requires cold storage, hardware authorization, and delay; custody service pending |
+| Global automatic blacklist | Specified | Reference registry/guard and Phase 1 typed event envelope implemented; durable store and propagation transport pending |
 | User-only unquarantine | Specified | Enforced by contract type; cryptographic hardware verification pending |
 | All-operation quarantine gates | Specified | One shared guard covers all operation kinds; chain adapters pending |
 

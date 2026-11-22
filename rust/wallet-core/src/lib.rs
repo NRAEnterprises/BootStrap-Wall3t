@@ -9,6 +9,8 @@ use std::fmt;
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod domain;
+
 pub type RegistryVersion = u64;
 pub type ChainId = u64;
 

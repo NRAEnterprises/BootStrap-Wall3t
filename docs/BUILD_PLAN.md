@@ -338,8 +338,8 @@ The first autonomous trading vertical slice should therefore be: one testnet cha
 ### Verdict
 
 - **Full-autonomy alignment:** PASS at the design level. Policies are machine-enforced operating definitions; ordinary execution does not require per-transaction approval or continuous human supervision.
-- **Vault-boundary alignment:** PASS at the design level; NOT IMPLEMENTED in the current repository. The finalized Secrets Vault, Automations Vault, and user-only Financial Cold Vault require separate principals, processes, APIs, and audit scopes, not merely separate directories.
-- **Global quarantine alignment:** PASS at the design level; NOT IMPLEMENTED across the wallet core. The Python prototype has only a partial, local, swap-focused `ThreatRegistry` check.
+- **Vault-boundary alignment:** PASS at the design level; Phase 1 contract foundation implemented in Rust, with concrete service/storage enforcement still open. The finalized Secrets Vault, Automations Vault, and user-only Financial Cold Vault require separate principals, processes, APIs, and audit scopes, not merely separate directories.
+- **Global quarantine alignment:** PASS at the design level; the Rust reference registry remains authoritative for execution and Phase 1 now adds a typed event envelope with provenance, propagation, monotonic-version, and reversal-reference validation. Durable replication and transport integration remain open.
 
 The current implementation remains a release blocker because it does not yet provide Rust wallet-core enforcement, a versioned authoritative quarantine registry, user-only reversal, signed replicated deny state or equivalent consistency, cache invalidation, or complete operation coverage.
 
@@ -360,6 +360,17 @@ The first executable trust-boundary slice now exists at `rust/wallet-core` (crat
 Verification: `cargo test --all-targets` passes 21 tests (12 unit, 9 public-API integration) and `cargo clippy --all-targets -- -D warnings` is clean. Coverage includes concurrent quarantine-versus-signing and quarantine-versus-broadcast races, reversal invalidating pre-existing tickets, router-only quarantine blocking a clean-token swap, all eleven operation kinds passing the same guard, newly created agents inheriting active deny state, and invalid evidence not mutating registry state.
 
 This is a reference implementation, not the production registry. It is process-local, unsigned, unpersisted, and has no chain adapter. `docs/RUST_WALLET_CORE.md` records the exact limits so no downstream claim outruns the code.
+
+### Phase 1 domain-contract foundation — 2026-11-21
+
+`rust/wallet-core/src/domain.rs` now provides the first executable contract slice for the Phase 1 handoff modules:
+
+- Module 1.1: opaque user/agent/policy/flow identifiers, wallet and assignment records, scoped assignments, revocation, and explicit rejection of agent-to-parent funding direction.
+- Module 1.2: typed Secrets, Automations, and Financial Cold vault policies with signer, browser, Elixir, agent, hardware, cold-storage, and withdrawal-delay invariants.
+- Module 1.3: policy scopes, budgets, retry rules, execution modes, document/capability bindings, and typed flow footprints without a per-transaction approval state.
+- Module 1.4: versioned quarantine events with evidence provenance, propagation acknowledgements, deny-overrides by contract position, and user-only reversal references.
+
+The foundation adds seven focused tests. The Rust workspace now passes 28 tests (19 unit, 9 public-API integration), and `cargo clippy --workspace --all-targets -- -D warnings` is clean. This is **in progress**, not a Phase 1 exit: persistence, canonical wire serialization, Elixir adapters, service enforcement, and cross-language contract tests remain required. See `docs/PHASE1_DOMAIN_CONTRACTS.md`.
 
 ### Required next gates
 
