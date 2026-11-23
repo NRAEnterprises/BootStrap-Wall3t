@@ -4,8 +4,7 @@ The router delegates all work to the appropriate ``ChainProvider`` from
 ``bootstrap_wall3t.chain.registry``.  The flow is:
 
 1. ``POST /tx/{chain}/create`` – build an unsigned transaction dict.
-2. ``POST /tx/{chain}/sign``   – currently disabled until a vault-backed signer
-   is integrated.
+2. ``POST /tx/{chain}/sign``   – sign through an injected vault-backed signer.
 3. ``POST /tx/{chain}/broadcast`` – mock‑broadcast the signed transaction and
    return a fake tx‑id.
 
@@ -20,8 +19,8 @@ import os
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 from typing import Any, Dict
-
 from bootstrap_wall3t.chain.registry import get_provider
+from bootstrap_wall3t.wallet.vault_signer import SigningUnavailable
 
 router = APIRouter()
 
@@ -31,6 +30,7 @@ class TxCreateRequest(BaseModel):
 
 class TxSignRequest(BaseModel):
     unsigned_tx: Dict[str, Any]
+    agent_id: str
 
 class TxBroadcastRequest(BaseModel):
     signed_tx: Dict[str, Any]
@@ -66,10 +66,18 @@ async def create_tx(chain: str, request: Request, body: TxCreateRequest):
 @router.post('/{chain}/sign', response_model=Dict[str, Any])
 async def sign_tx(chain: str, request: Request, body: TxSignRequest):
     _require_auth(request)
-    raise HTTPException(
-        status_code=503,
-        detail='Transaction signing is disabled until a vault-backed signer is configured',
-    )
+    signer = getattr(request.app.state, 'tx_signer', None)
+    if signer is None:
+        raise HTTPException(
+            status_code=503,
+            detail='Transaction signing is unavailable until a vault-backed signer is configured',
+        )
+    try:
+        return signer.sign(chain, body.agent_id, body.unsigned_tx)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f'Chain {chain!r} not supported') from exc
+    except SigningUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post('/{chain}/broadcast', response_model=Dict[str, str])

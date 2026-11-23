@@ -52,6 +52,14 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
 # ---------------------------------------------------------------------------
 
 app = FastAPI()
+app.state.tx_signer = None
+
+
+def configure_tx_signer(signer: Any) -> None:
+    """Inject a vault-backed signer after the operator unlock ceremony."""
+    if signer is None or not callable(getattr(signer, "sign", None)):
+        raise TypeError("signer must provide a callable sign method")
+    app.state.tx_signer = signer
 
 app.add_middleware(
     CORSMiddleware,
