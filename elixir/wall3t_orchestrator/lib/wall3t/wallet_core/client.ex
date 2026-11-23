@@ -2,16 +2,18 @@ defmodule Wall3t.WalletCore.Client do
   @moduledoc """
   Boundary between the management plane and the Rust wallet core.
 
-  The management plane may only *request* work. It cannot sign, broadcast, or
-  bypass policy. A production adapter speaks to the Rust service over an
-  authenticated channel and receives opaque tickets and receipts.
+  The management plane may only request work. It cannot sign, broadcast, or
+  bypass policy. Production uses an authenticated adapter and opaque tickets.
   """
+
+  alias Wall3t.ActionContext
 
   @type intent :: %{
           required(:agent_id) => String.t(),
           required(:wallet_id) => String.t(),
           required(:operation) => atom(),
-          required(:footprint) => [String.t()],
+          required(:action_context) => ActionContext.t(),
+          required(:context_hash) => String.t(),
           required(:flow_id) => String.t(),
           required(:flow_hash) => String.t(),
           optional(:metadata) => map()
@@ -28,10 +30,7 @@ defmodule Wall3t.WalletCore.Stub do
   @moduledoc """
   Recording stub for tests and local development.
 
-  It deliberately performs the same pre-flight checks the real adapter would
-  surface, so the management plane can be exercised without a live Rust
-  service. It is not a signing implementation and must never be deployed as
-  one.
+  It is not a signing implementation and must never be deployed as one.
   """
 
   use GenServer
@@ -64,7 +63,7 @@ defmodule Wall3t.WalletCore.Stub do
   @impl true
   def handle_call({:simulate, intent}, _from, state) do
     with {:ok, snapshot} <- Wall3t.Quarantine.Store.barrier(),
-         :ok <- Wall3t.Quarantine.Store.denied_any?(intent.footprint) do
+         :ok <- Wall3t.Quarantine.Store.denied_any?(intent.action_context.footprint) do
       ticket = %{
         ticket_id: "tkt_" <> Integer.to_string(length(state.intents) + 1),
         registry_version: snapshot.version,

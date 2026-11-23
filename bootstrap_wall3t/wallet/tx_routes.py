@@ -4,13 +4,83 @@ The router delegates all work to the appropriate ``ChainProvider`` from
 ``bootstrap_wall3t.chain.registry``.  The flow is:
 
 1. ``POST /tx/{chain}/create`` – build an unsigned transaction dict.
-2. ``POST /tx/{chain}/sign``   – sign the unsigned dict using the derived key.
+2. ``POST /tx/{chain}/sign``   – currently disabled until a vault-backed signer
+   is integrated.
 3. ``POST /tx/{chain}/broadcast`` – mock‑broadcast the signed transaction and
    return a fake tx‑id.
 
 All endpoints require the ``Authorization: Bearer <token>`` header that the
 existing server middleware validates.
-'''\n\nfrom __future__ import annotations\n\nimport json\nfrom fastapi import APIRouter, HTTPException, Request, status\nfrom pydantic import BaseModel\nfrom typing import Any, Dict\n\nfrom bootstrap_wall3t.chain.registry import get_provider\n\nrouter = APIRouter()\n\n\nclass TxCreateRequest(BaseModel):\n    params: Dict[str, Any]\n\nclass TxSignRequest(BaseModel):\n    unsigned_tx: Dict[str, Any]\n    mnemonic: str  # dev‑only – in production this would be fetched from a vault\n\nclass TxBroadcastRequest(BaseModel):\n    signed_tx: Dict[str, Any]\n\n\ndef _require_auth(request: Request):\n    # Re‑use the same simple token check as the rest of the server.
-    auth = request.headers.get('Authorization')\n    if not auth or not auth.startswith('Bearer '):\n        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Missing token')\n    token = auth.removeprefix('Bearer ').strip()\n    # DEV_TOKEN is defined in the main server; we import the env var here as a fallback.
-    from os import getenv\n    dev_token = getenv('DEV_TOKEN', 'dev-token')\n    if token != dev_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid token')\n\n\n@router.post('/{chain}/create', response_model=Dict[str, Any])\nasync def create_tx(chain: str, request: Request, body: TxCreateRequest):\n    _require_auth(request)\n    try:\n        provider = get_provider(chain)\n    except KeyError:\n        raise HTTPException(status_code=404, detail=f'Chain {chain!r} not supported')\n    try:\n        unsigned = provider.build_tx(body.params)\n    except Exception as e:\n        raise HTTPException(status_code=400, detail=str(e))\n    return unsigned\n\n\n@router.post('/{chain}/sign', response_model=Dict[str, Any])\nasync def sign_tx(chain: str, request: Request, body: TxSignRequest):\n    _require_auth(request)\n    try:\n        provider = get_provider(chain)\n    except KeyError:\n        raise HTTPException(status_code=404, detail=f'Chain {chain!r} not supported')\n    private_key = provider.derive_key(body.mnemonic)\n    signature = provider.sign_tx(body.unsigned_tx, private_key)\n    signed = {"unsigned_tx": body.unsigned_tx, "signature": signature}\n    return signed\n\n\n@router.post('/{chain}/broadcast', response_model=Dict[str, str])\nasync def broadcast_tx(chain: str, request: Request, body: TxBroadcastRequest):\n    _require_auth(request)\n    try:\n        provider = get_provider(chain)\n    except KeyError:\n        raise HTTPException(status_code=404, detail=f'Chain {chain!r} not supported')\n    try:\n        txid = provider.broadcast_tx(body.signed_tx)\n    except Exception as e:\n        raise HTTPException(status_code=400, detail=str(e))\n    return {"txid": txid}\n
+'''
+
+from __future__ import annotations
+
+import hmac
+import os
+from fastapi import APIRouter, HTTPException, Request, status
+from pydantic import BaseModel
+from typing import Any, Dict
+
+from bootstrap_wall3t.chain.registry import get_provider
+
+router = APIRouter()
+
+
+class TxCreateRequest(BaseModel):
+    params: Dict[str, Any]
+
+class TxSignRequest(BaseModel):
+    unsigned_tx: Dict[str, Any]
+
+class TxBroadcastRequest(BaseModel):
+    signed_tx: Dict[str, Any]
+
+
+def _require_auth(request: Request):
+    # Keep this router fail-closed when mounted independently from the main app.
+    auth = request.headers.get('Authorization')
+    if not auth or not auth.startswith('Bearer '):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Missing token')
+    token = auth.removeprefix('Bearer ').strip()
+    configured_token = os.getenv('DEV_TOKEN')
+    if not configured_token or len(configured_token) < 32:
+        raise HTTPException(status_code=503, detail='Authentication is not configured securely')
+    if not hmac.compare_digest(token, configured_token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid token')
+
+
+@router.post('/{chain}/create', response_model=Dict[str, Any])
+async def create_tx(chain: str, request: Request, body: TxCreateRequest):
+    _require_auth(request)
+    try:
+        provider = get_provider(chain)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f'Chain {chain!r} not supported')
+    try:
+        unsigned = provider.build_tx(body.params)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return unsigned
+
+
+@router.post('/{chain}/sign', response_model=Dict[str, Any])
+async def sign_tx(chain: str, request: Request, body: TxSignRequest):
+    _require_auth(request)
+    raise HTTPException(
+        status_code=503,
+        detail='Transaction signing is disabled until a vault-backed signer is configured',
+    )
+
+
+@router.post('/{chain}/broadcast', response_model=Dict[str, str])
+async def broadcast_tx(chain: str, request: Request, body: TxBroadcastRequest):
+    _require_auth(request)
+    try:
+        provider = get_provider(chain)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f'Chain {chain!r} not supported')
+    try:
+        txid = provider.broadcast_tx(body.signed_tx)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"txid": txid}

@@ -2,19 +2,17 @@ defmodule Wall3t.Automation.Flow do
   @moduledoc """
   An immutable automation flow definition.
 
-  A flow is configuration, not authority. It describes steps, each of which
-  becomes a typed intent for the Rust wallet core. The flow carries a content
-  hash so a policy activation can pin the exact version the user approved.
-
-  Steps use canonical string footprints, for example:
-
-      %{operation: :swap, footprint: ["token:1:0xaaa", "router:1:0xbbb"], cost: 1}
+  A flow is configuration, not authority. Each step must contain a validated
+  `Wall3t.ActionContext`; model or external-content maps must be normalized
+  before they can enter a flow.
   """
+
+  alias Wall3t.ActionContext
 
   @enforce_keys [:id, :version, :trigger, :steps]
   defstruct [:id, :version, :trigger, :steps, :content_hash, :scope]
 
-  @type step :: %{required(:operation) => atom(), required(:footprint) => [String.t()], optional(:cost) => pos_integer()}
+  @type step :: %{required(:action_context) => ActionContext.t(), optional(:cost) => pos_integer()}
   @type trigger :: %{kind: :manual | :interval | :event, every_ms: pos_integer() | nil, at_ms: integer() | nil}
   @type t :: %__MODULE__{
           id: String.t(),
@@ -37,12 +35,7 @@ defmodule Wall3t.Automation.Flow do
     end
   end
 
-  @doc """
-  Recomputes the hash from id, version, trigger, and steps.
-
-  `scope` is intentionally excluded so the same flow can be attached to
-  different wallets without changing its identity.
-  """
+  @doc "Recomputes the hash from identity, trigger, and canonical action contexts."
   @spec content_hash(t()) :: String.t()
   def content_hash(%__MODULE__{} = flow) do
     canonical = {flow.id, flow.version, normalize_trigger(flow.trigger), normalize_steps(flow.steps)}
@@ -53,16 +46,13 @@ defmodule Wall3t.Automation.Flow do
 
   @spec hash_matches?(t()) :: boolean()
   def hash_matches?(%__MODULE__{content_hash: nil}), do: false
+  def hash_matches?(%__MODULE__{} = flow), do: content_hash(flow) == flow.content_hash
 
-  def hash_matches?(%__MODULE__{} = flow) do
-    content_hash(flow) == flow.content_hash
-  end
-
-  @doc "Every distinct entity across all steps, used for the pre-flight deny check."
+  @doc "Every distinct entity across all typed action contexts."
   @spec footprint(t()) :: [String.t()]
   def footprint(%__MODULE__{steps: steps}) do
     steps
-    |> Enum.flat_map(&Map.get(&1, :footprint, []))
+    |> Enum.flat_map(& &1.action_context.footprint)
     |> Enum.uniq()
   end
 
@@ -93,9 +83,9 @@ defmodule Wall3t.Automation.Flow do
 
   defp validate_steps(_), do: {:error, :invalid_step}
 
-  defp valid_step?(%{operation: operation, footprint: footprint})
-       when is_atom(operation) and is_list(footprint) do
-    Enum.all?(footprint, &is_binary/1)
+  defp valid_step?(%{action_context: %ActionContext{} = context} = step) do
+    context.operation != nil and context.footprint != [] and
+      (not Map.has_key?(step, :cost) or (is_integer(step.cost) and step.cost > 0))
   end
 
   defp valid_step?(_), do: false
@@ -106,7 +96,7 @@ defmodule Wall3t.Automation.Flow do
 
   defp normalize_steps(steps) do
     Enum.map(steps, fn step ->
-      {Map.get(step, :operation), Enum.sort(Map.get(step, :footprint, [])), Map.get(step, :cost, 1)}
+      {ActionContext.canonical(step.action_context), Map.get(step, :cost, 1)}
     end)
   end
 end

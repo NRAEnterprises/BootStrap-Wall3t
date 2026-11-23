@@ -2,20 +2,12 @@ defmodule Wall3t.Automation.Runner do
   @moduledoc """
   Turns an approved flow into typed intents for the Rust wallet core.
 
-  Ordering matters:
-
-    1. capability must authorize the operation and scope;
-    2. budget must cover the flow's declared cost;
-    3. the local quarantine projection must be fresh;
-    4. no entity in the flow footprint may be denied;
-    5. only then are intents submitted.
-
-  Steps 3 and 4 are a *pre-flight* check to fail fast and to avoid pointless
-  work. They are not the enforcement point. The Rust core re-checks policy and
-  quarantine authoritatively at simulation, signing, and broadcast, and a stale
-  ticket is rejected there even if this layer allowed the attempt.
+  The management plane only performs early checks. Rust wallet-core must still
+  re-derive the final footprint and re-check policy, quarantine, and freshness
+  at simulation, signing, and broadcast.
   """
 
+  alias Wall3t.ActionContext
   alias Wall3t.Automation.Flow
   alias Wall3t.Capability
   alias Wall3t.Quarantine.Store
@@ -49,23 +41,27 @@ defmodule Wall3t.Automation.Runner do
   @spec verify_capability(agent(), Flow.t(), integer() | nil) :: :ok | {:error, atom()}
   def verify_capability(agent, %Flow{} = flow, now_ms \\ nil) do
     opts = if now_ms, do: [now_ms: now_ms], else: []
-
-    authorized? =
-      Enum.all?(flow.steps, fn step ->
-        Capability.authorizes?(agent.capability, step.operation, opts)
-      end)
+    effective_now = now_ms || System.monotonic_time(:millisecond)
 
     cond do
-      Capability.expired?(agent.capability, now_ms || System.monotonic_time(:millisecond)) ->
+      Capability.expired?(agent.capability, effective_now) ->
         {:error, :capability_expired}
 
-      authorized? ->
+      Enum.all?(flow.steps, fn
+        %{action_context: %ActionContext{} = context} ->
+          Capability.authorizes?(agent.capability, context, opts)
+
+        _ ->
+          false
+      end) ->
         :ok
 
       true ->
         {:error, :capability_denied}
     end
   end
+
+  def verify_capability(_agent, _flow, _now_ms), do: {:error, :incomplete_action_context}
 
   @spec verify_budget(agent(), Flow.t()) :: :ok | {:error, atom()}
   def verify_budget(agent, %Flow{} = flow) do
@@ -90,12 +86,15 @@ defmodule Wall3t.Automation.Runner do
 
   defp submit(agent, %Flow{} = flow, client) do
     flow.steps
-    |> Enum.reduce_while({:ok, []}, fn step, {:ok, acc} ->
+    |> Enum.reduce_while({:ok, []}, fn %{action_context: %ActionContext{} = context} = step, {:ok, acc} ->
+      context_hash = context_hash(context)
+
       intent = %{
         agent_id: agent.id,
         wallet_id: agent.wallet_id,
-        operation: step.operation,
-        footprint: step.footprint,
+        operation: context.operation,
+        action_context: context,
+        context_hash: context_hash,
         flow_id: flow.id,
         flow_hash: flow.content_hash
       }
@@ -108,7 +107,8 @@ defmodule Wall3t.Automation.Runner do
             at_ms: System.monotonic_time(:millisecond),
             flow_id: flow.id,
             flow_hash: flow.content_hash,
-            operation: step.operation,
+            operation: context.operation,
+            context_hash: context_hash,
             ticket_id: ticket.ticket_id,
             registry_version: ticket.registry_version
           })
@@ -121,7 +121,7 @@ defmodule Wall3t.Automation.Runner do
             subject: agent.id,
             at_ms: System.monotonic_time(:millisecond),
             flow_id: flow.id,
-            operation: step.operation,
+            operation: context.operation,
             reason: reason
           })
 
@@ -132,5 +132,10 @@ defmodule Wall3t.Automation.Runner do
       {:ok, intents} -> {:ok, Enum.reverse(intents)}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp context_hash(context) do
+    :crypto.hash(:sha256, :erlang.term_to_binary(ActionContext.canonical(context)))
+    |> Base.encode16(case: :lower)
   end
 end
