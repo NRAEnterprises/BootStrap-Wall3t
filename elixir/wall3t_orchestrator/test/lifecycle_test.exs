@@ -4,6 +4,7 @@ defmodule Wall3t.LifecycleTest do
   alias Wall3t.Agent.Manager
   alias Wall3t.Automation.RunHistory
   alias Wall3t.Automation.Retry
+  alias Wall3t.WalletCore.RustService
 
   setup do
     id = "test-agent-#{System.unique_integer([:positive])}"
@@ -34,5 +35,37 @@ defmodule Wall3t.LifecycleTest do
     assert Retry.delay_ms(4, base_ms: 100, max_ms: 500) == 500
     assert Retry.retry?(1, 3)
     refute Retry.retry?(3, 3)
+  end
+
+  test "supervisor restarts the Rust service after an abnormal exit", _ctx do
+    name = String.to_atom("rust-service-test-#{System.unique_integer([:positive])}")
+
+    marker =
+      Path.join(System.tmp_dir!(), "wall3t-rust-service-#{System.unique_integer([:positive])}")
+
+    script = "if [ -e #{marker} ]; then exec sleep 2; else : > #{marker}; exit 17; fi"
+
+    on_exit(fn -> File.rm(marker) end)
+
+    assert is_pid(
+             start_supervised!(
+               {RustService,
+                command: System.find_executable("sh"), args: ["-c", script], name: name}
+             )
+           )
+
+    assert wait_until(fn -> File.exists?(marker) and RustService.status(name) == :running end)
+  end
+
+  defp wait_until(predicate, attempts \\ 50)
+  defp wait_until(_predicate, 0), do: false
+
+  defp wait_until(predicate, attempts) do
+    if predicate.() do
+      true
+    else
+      Process.sleep(20)
+      wait_until(predicate, attempts - 1)
+    end
   end
 end

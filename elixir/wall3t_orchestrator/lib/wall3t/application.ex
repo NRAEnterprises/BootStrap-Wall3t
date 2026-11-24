@@ -12,15 +12,28 @@ defmodule Wall3t.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      {Registry, keys: :unique, name: Wall3t.AgentRegistry},
-      {DynamicSupervisor, strategy: :one_for_one, name: Wall3t.AgentSupervisor},
-      Wall3t.Automation.RunHistory,
-      Wall3t.Quarantine.Store,
-      Wall3t.Audit.Log,
-      Wall3t.WalletCore.Stub
-    ]
+    children =
+      [
+        {Registry, keys: :unique, name: Wall3t.AgentRegistry},
+        {DynamicSupervisor, strategy: :one_for_one, name: Wall3t.AgentSupervisor},
+        Wall3t.Automation.RunHistory,
+        Wall3t.Quarantine.Store,
+        Wall3t.Audit.Log,
+        Wall3t.WalletCore.Stub
+      ] ++ rust_service_children()
 
-    Supervisor.start_link(children, strategy: :one_for_one, name: Wall3t.Supervisor)
+    Supervisor.start_link(children,
+      strategy: :one_for_one,
+      max_restarts: 3,
+      max_seconds: 5,
+      name: Wall3t.Supervisor
+    )
+  end
+
+  defp rust_service_children do
+    case System.get_env("WALL3T_RUST_SERVICE_AUTOSTART") do
+      "1" -> [Wall3t.WalletCore.RustService.from_env()]
+      _ -> []
+    end
   end
 end
