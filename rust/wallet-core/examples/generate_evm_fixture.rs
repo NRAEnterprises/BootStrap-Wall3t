@@ -4,25 +4,35 @@ use wallet_core::domain::{AgentWalletId, CapabilityId, DocumentHash, PolicyId};
 use wallet_core::evm_intent::{
     EvmAddress, EvmFeePolicy, EvmOperation, EvmTransactionIntent, IntentId, PrincipalBinding, U256,
 };
-use wallet_core::{EntityRef};
+use wallet_core::EntityRef;
 
 fn hex(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes { write!(&mut out, "{byte:02x}").unwrap(); }
+    for byte in bytes {
+        write!(&mut out, "{byte:02x}").unwrap();
+    }
     out
 }
 
 fn fixture() -> EvmTransactionIntent {
     let mut footprint = vec![
-        EntityRef::Wallet { chain_id: 1, address: "1111111111111111111111111111111111111111".into() },
-        EntityRef::Contract { chain_id: 1, address: "2222222222222222222222222222222222222222".into() },
+        EntityRef::Wallet {
+            chain_id: 1,
+            address: "1111111111111111111111111111111111111111".into(),
+        },
+        EntityRef::Contract {
+            chain_id: 1,
+            address: "2222222222222222222222222222222222222222".into(),
+        },
         EntityRef::Chain { chain_id: 1 },
     ];
     footprint.sort();
     EvmTransactionIntent {
         intent_id: IntentId::new("fixture-intent-1").unwrap(),
         wallet_id: "wallet-fixture-1".into(),
-        principal: PrincipalBinding::Agent { agent_id: AgentWalletId::new("agent-fixture-1").unwrap() },
+        principal: PrincipalBinding::Agent {
+            agent_id: AgentWalletId::new("agent-fixture-1").unwrap(),
+        },
         operation: EvmOperation::ContractCall,
         chain_id: 1,
         from: EvmAddress::new([0x11; 20]),

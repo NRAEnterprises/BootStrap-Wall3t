@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
-use crate::authenticated::{AuthenticatedEnvelope, AuthError, SignatureVerifier};
+use crate::authenticated::{AuthError, AuthenticatedEnvelope, SignatureVerifier};
 
 const MAGIC: &[u8; 4] = b"BWNR";
 const VERSION: u16 = 1;
@@ -202,8 +202,15 @@ fn decode(bytes: &[u8]) -> Result<BTreeMap<ReplayKey, ReplayRecord>, ReplayError
         if nonce == [0; NONCE_LEN] || signer.is_empty() || key_id.is_empty() {
             return Err(ReplayError::Corrupt);
         }
-        let key = ReplayKey { signer, key_id, nonce };
-        if entries.insert(key, ReplayRecord { expires_at_unix }).is_some() {
+        let key = ReplayKey {
+            signer,
+            key_id,
+            nonce,
+        };
+        if entries
+            .insert(key, ReplayRecord { expires_at_unix })
+            .is_some()
+        {
             return Err(ReplayError::Corrupt);
         }
     }
@@ -228,7 +235,10 @@ struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     fn take(&mut self, length: usize) -> Result<&'a [u8], ReplayError> {
-        let end = self.cursor.checked_add(length).ok_or(ReplayError::Corrupt)?;
+        let end = self
+            .cursor
+            .checked_add(length)
+            .ok_or(ReplayError::Corrupt)?;
         if end > self.bytes.len() {
             return Err(ReplayError::Corrupt);
         }
@@ -279,12 +289,17 @@ mod tests {
 
     impl SignatureVerifier for TestVerifier {
         fn verify(&self, signer: &str, key_id: &str, message: &[u8], signature: &[u8]) -> bool {
-            self.0.verify_at(signer, key_id, message, signature, 50).is_ok()
+            self.0
+                .verify_at(signer, key_id, message, signature, 50)
+                .is_ok()
         }
     }
 
     fn path(label: &str) -> PathBuf {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
         std::env::temp_dir().join(format!("bootstrap-wall3t-replay-{label}-{nonce}.bin"))
     }
 
@@ -292,11 +307,17 @@ mod tests {
         let unsigned = AuthenticatedEnvelope::from_payload(
             "rust-wallet-core",
             "key-1",
-            BindingContext { subject: "wallet-1".into(), registry_version: 1, expires_at_unix: 100, nonce: [7; 16] },
+            BindingContext {
+                subject: "wallet-1".into(),
+                registry_version: 1,
+                expires_at_unix: 100,
+                nonce: [7; 16],
+            },
             7,
             b"BW3C\0\x01\x07payload".to_vec(),
             vec![1],
-        ).expect("unsigned");
+        )
+        .expect("unsigned");
         let signature = key.sign(&unsigned.signed_message()).to_bytes().to_vec();
         AuthenticatedEnvelope::from_payload(
             unsigned.signer,
@@ -305,18 +326,27 @@ mod tests {
             unsigned.kind,
             unsigned.payload,
             signature,
-        ).expect("signed")
+        )
+        .expect("signed")
     }
 
     #[test]
     fn consume_is_persistent_and_replay_is_rejected() {
         let path = path("roundtrip");
         let registry = PersistentNonceRegistry::open(&path).expect("open");
-        registry.consume("signer", "key", &[1; 16], 100, 50).expect("consume");
-        assert_eq!(registry.consume("signer", "key", &[1; 16], 100, 50), Err(ReplayError::AlreadyConsumed));
+        registry
+            .consume("signer", "key", &[1; 16], 100, 50)
+            .expect("consume");
+        assert_eq!(
+            registry.consume("signer", "key", &[1; 16], 100, 50),
+            Err(ReplayError::AlreadyConsumed)
+        );
         drop(registry);
         let reopened = PersistentNonceRegistry::open(&path).expect("reopen");
-        assert_eq!(reopened.consume("signer", "key", &[1; 16], 100, 50), Err(ReplayError::AlreadyConsumed));
+        assert_eq!(
+            reopened.consume("signer", "key", &[1; 16], 100, 50),
+            Err(ReplayError::AlreadyConsumed)
+        );
         std::fs::remove_file(path).expect("cleanup");
     }
 
@@ -325,10 +355,21 @@ mod tests {
         let path = path("verify");
         let signing_key = SigningKey::from_bytes(&[12; 32]);
         let keys = KeyRegistry::new();
-        keys.register(RegisteredKey { key_id: "key-1".into(), signer: "rust-wallet-core".into(), algorithm: KeyAlgorithm::Ed25519, public_key: signing_key.verifying_key().to_bytes(), not_before_unix: 0, expires_at_unix: None, revoked: false }).expect("key");
+        keys.register(RegisteredKey {
+            key_id: "key-1".into(),
+            signer: "rust-wallet-core".into(),
+            algorithm: KeyAlgorithm::Ed25519,
+            public_key: signing_key.verifying_key().to_bytes(),
+            not_before_unix: 0,
+            expires_at_unix: None,
+            revoked: false,
+        })
+        .expect("key");
         let envelope = envelope(&signing_key);
         let replay = PersistentNonceRegistry::open(&path).expect("open");
-        assert!(replay.verify_and_consume(&envelope, &TestVerifier(keys), 50).is_ok());
+        assert!(replay
+            .verify_and_consume(&envelope, &TestVerifier(keys), 50)
+            .is_ok());
         std::fs::remove_file(path).expect("cleanup");
     }
 

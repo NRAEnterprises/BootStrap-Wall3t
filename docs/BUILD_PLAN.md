@@ -558,6 +558,19 @@ Rust autostart is deployment opt-in only: `WALL3T_RUST_SERVICE_AUTOSTART=1` requ
 
 Verification includes an Elixir process-level regression test that starts a short-lived Rust-service substitute, observes the abnormal exit, and confirms the OTP supervisor restarts the child. Remaining deployment-specific gates are service identity attestation, IPC policy, restart/replay-state recovery, and supervisor integration with the host service manager.
 
+## 26. Phase 2 hardware custody and shared Ed25519 vectors — 2026-11-24
+
+The Phase 2 custody boundary now includes `rust/wallet-core/src/hardware.rs`:
+
+- `HardwareKeyHandle` is an opaque, validated provider reference. Wallet-core records contain only that handle, signer/key identifiers, public Ed25519 metadata, validity windows, and revocation state.
+- `HardwareCustodyProvider` owns private-key operations. Its `sign` and `verify` methods are the only provider boundary; Elixir, the browser, ordinary wallet-core metadata, and transport envelopes receive no seed, mnemonic, PIN, device session, or private key.
+- Registration validates the public key and lifecycle record before persistence in memory. Sign, verify, and the `SignatureVerifier` adapter re-check signer binding, activation, expiry, revocation, and provider results, failing closed on every invalid or unavailable state.
+- The in-memory Ed25519 provider exists only inside Rust unit tests to prove delegation and revocation. Real HSM, hardware-wallet, secure-enclave, remote-attestation, device-session, and key-recovery adapters remain production gates.
+
+`vectors/phase2_ed25519_vectors.tsv` establishes a minimal cross-language signature contract with explicit algorithm, signer, key ID, public key, message, signature, and expected-result fields. It includes valid, tampered-message, and tampered-signature cases. Rust and Elixir consume the same file; the Elixir test uses OTP's explicit Ed25519 key-type representation and does not sign. This is interoperability evidence, not a claim that transport, device custody, or browser cryptography is complete.
+
+After synchronizing with `origin/main`, the source checkout includes the upstream authenticated Unix transport, durable replay protection, restart recovery, restrictive socket policy, and lifecycle supervision changes before this checkpoint is layered on top. Rust validation passes 49 unit tests and 9 quarantine-race integration tests; the Elixir suite passes 22 tests after making the supervisor restart poll tolerant of the expected transient `GenServer` exit; shared vector tests pass in both languages. Remaining Phase 2 gates are real hardware adapters and attestation, durable replicated key/replay authority, clock/expiry policy, TypeScript vector consumption, transport identity, and quarantine-authority integration.
+
 ## 26. Phase 2 restart and replay-state recovery testing — 2026-11-24
 
 `tools/test_socket_restart_recovery.sh` adds process-level fault-injection scenarios for the authenticated Unix transport. It consumes a valid BWAU nonce, terminates the Rust endpoint, restarts it against the same durable BWNR journal, and verifies the previously accepted envelope is rejected as a replay. It then replaces the journal with malformed bytes and verifies startup fails closed without creating a socket. The scenarios distinguish recoverable service restart from unrecoverable replay-state corruption; no recovery path is permitted to reset or bypass consumed nonces.

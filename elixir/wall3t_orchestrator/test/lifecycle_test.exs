@@ -54,7 +54,7 @@ defmodule Wall3t.LifecycleTest do
              )
            )
 
-    assert wait_until(fn -> File.exists?(marker) and RustService.status(name) == :running end)
+    assert wait_until(fn -> File.exists?(marker) and service_running?(name) end)
   end
 
   defp wait_until(predicate, attempts \\ 50)
@@ -67,5 +67,11 @@ defmodule Wall3t.LifecycleTest do
       Process.sleep(20)
       wait_until(predicate, attempts - 1)
     end
+  end
+
+  defp service_running?(name) do
+    RustService.status(name) == :running
+  catch
+    :exit, _ -> false
   end
 end

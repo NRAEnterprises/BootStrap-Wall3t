@@ -145,13 +145,17 @@ fn handle_request(
 
 fn read_frame(stream: &mut UnixStream) -> Result<Vec<u8>, &'static str> {
     let mut header = [0u8; 4];
-    stream.read_exact(&mut header).map_err(|_| "truncated-frame")?;
+    stream
+        .read_exact(&mut header)
+        .map_err(|_| "truncated-frame")?;
     let length = u32::from_be_bytes(header) as usize;
     if length == 0 || length > MAX_FRAME {
         return Err("frame-length");
     }
     let mut payload = vec![0u8; length];
-    stream.read_exact(&mut payload).map_err(|_| "truncated-frame")?;
+    stream
+        .read_exact(&mut payload)
+        .map_err(|_| "truncated-frame")?;
     Ok(payload)
 }
 

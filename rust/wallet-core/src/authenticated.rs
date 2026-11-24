@@ -276,6 +276,9 @@ pub fn payload_digest(kind: u8, payload: &[u8]) -> Sha256Digest {
 /// by the generic BWAU envelope. The wallet-core issuer signs this transcript
 /// with the same allowlisted key as the BWAU signed message. Keep this layout
 /// byte-identical with `wallet_core_gate._ticket_context_message`.
+// The explicit argument list is part of the reviewed wire contract; grouping
+// fields into an opaque struct would make accidental transcript omission easier.
+#[allow(clippy::too_many_arguments)]
 pub fn ticket_binding_message(
     chain_id: u64,
     request_id: &str,
