@@ -74,7 +74,7 @@ fn put_vec<T>(values: &[T], out: &mut Vec<u8>, mut encode: impl FnMut(&T, &mut V
     }
 }
 
-fn put_entity(entity: &EntityRef, out: &mut Vec<u8>) {
+pub(crate) fn encode_entity(entity: &EntityRef, out: &mut Vec<u8>) {
     match entity {
         EntityRef::Token { chain_id, address } => {
             put_u8(1, out);
@@ -214,7 +214,7 @@ fn put_retry(retry: &RetryPolicy, out: &mut Vec<u8>) {
 
 fn put_step(step: &FlowStep, out: &mut Vec<u8>) {
     put_str(&step.operation, out);
-    put_vec(&step.footprint, out, put_entity);
+    put_vec(&step.footprint, out, encode_entity);
     put_u128(step.estimated_cost, out);
 }
 
@@ -325,7 +325,7 @@ impl CanonicalWire for QuarantineEvent {
         header(Self::KIND, &mut out);
         put_u64(self.quarantine_id, &mut out);
         put_u64(self.registry_version, &mut out);
-        put_entity(&self.subject, &mut out);
+        encode_entity(&self.subject, &mut out);
         put_str(&self.reason_code, &mut out);
         put_provenance(&self.provenance, &mut out);
         put_reporter(&self.reported_by, &mut out);

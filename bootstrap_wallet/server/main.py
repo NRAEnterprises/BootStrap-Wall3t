@@ -17,6 +17,7 @@ import time
 import base64
 import hmac
 import hashlib
+import math
 from typing import List, Dict, Any
 
 from fastapi import FastAPI, Request, HTTPException, status
@@ -81,10 +82,22 @@ def _required_secret(name: str) -> str:
     return value
 
 
+def _required_setting(name: str) -> str:
+    """Load a non-secret security setting or fail closed at startup."""
+    value = os.getenv(name)
+    if not value or len(value) > 256:
+        raise RuntimeError(f'{name} must be configured and no longer than 256 characters')
+    return value
+
+
 DEV_TOKEN = _required_secret("DEV_TOKEN")
 JWT_SECRET = _required_secret("JWT_SECRET")
 if DEV_TOKEN == JWT_SECRET:
     raise RuntimeError('DEV_TOKEN and JWT_SECRET must be distinct secrets')
+JWT_ISSUER = _required_setting("JWT_ISSUER")
+JWT_AUDIENCE = _required_setting("JWT_AUDIENCE")
+JWT_CLOCK_SKEW_SECONDS = 30
+JWT_MAX_LIFETIME_SECONDS = 900
 
 def _decode_jwt(token: str) -> dict:
     try:
@@ -92,12 +105,53 @@ def _decode_jwt(token: str) -> dict:
         def pad(b: str) -> str:
             return b + '=' * (-len(b) % 4)
         header = json.loads(base64.urlsafe_b64decode(pad(header_b64)))
+        if not isinstance(header, dict) or header.get('alg') != 'HS256' or header.get('typ') != 'JWT':
+            raise ValueError('Unsupported JWT header')
         payload = json.loads(base64.urlsafe_b64decode(pad(payload_b64)))
+        if not isinstance(payload, dict):
+            raise ValueError('Invalid JWT claims')
         signed = f"{header_b64}.{payload_b64}".encode()
         expected_sig = hmac.new(JWT_SECRET.encode(), signed, hashlib.sha256).digest()
         actual_sig = base64.urlsafe_b64decode(pad(signature_b64))
         if not hmac.compare_digest(expected_sig, actual_sig):
             raise ValueError("Invalid signature")
+
+        principal = payload.get('sub')
+        issuer = payload.get('iss')
+        audience = payload.get('aud')
+        now = time.time()
+        if not isinstance(principal, str) or not principal or len(principal) > 128:
+            raise ValueError('Invalid subject')
+        if issuer != JWT_ISSUER:
+            raise ValueError('Invalid issuer')
+        if isinstance(audience, str):
+            audience_values = [audience]
+        elif isinstance(audience, list) and all(isinstance(item, str) for item in audience):
+            audience_values = audience
+        else:
+            raise ValueError('Invalid audience')
+        if JWT_AUDIENCE not in audience_values:
+            raise ValueError('Invalid audience')
+
+        exp = payload.get('exp')
+        issued_at = payload.get('iat')
+        not_before = payload.get('nbf', issued_at)
+        numeric_claims = (exp, issued_at, not_before)
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in numeric_claims
+        ):
+            raise ValueError('Invalid JWT time claims')
+        if exp <= now - JWT_CLOCK_SKEW_SECONDS:
+            raise ValueError('JWT expired')
+        if issued_at > now + JWT_CLOCK_SKEW_SECONDS:
+            raise ValueError('JWT issued in the future')
+        if not_before > now + JWT_CLOCK_SKEW_SECONDS:
+            raise ValueError('JWT not yet valid')
+        if exp <= issued_at or exp - issued_at > JWT_MAX_LIFETIME_SECONDS:
+            raise ValueError('JWT lifetime is invalid')
         return payload
     except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid JWT")

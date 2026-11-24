@@ -24,6 +24,20 @@ data/*.db
 
 # Generated review packages and deck exports
 dist/
+# Generated EVM compiler artifacts; source and deployment metadata remain tracked.
+artifacts/evm/
 
 # Elixir/Mix build artifacts
 **/_build/
+
+# TypeScript/Node local dependencies and build artifacts
+**/node_modules/
+**/npm-debug.log*
+
+# Zig build cache/output
+**/.zig-cache/
+**/zig-out/
+
+# Fuel and Move compiler outputs
+contracts/fuel/**/out/
+contracts/move/**/build/

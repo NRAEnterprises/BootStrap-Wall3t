@@ -495,3 +495,33 @@ Evidence: the Rust workspace passes 38 tests, `cargo fmt --all -- --check`, and 
 The authenticated envelope now carries and signs the explicit key ID, making rotation deterministic rather than selecting an implicit current key. Registry registration rejects duplicate IDs and invalid identities/windows. Verification rejects missing keys, signer mismatches, revoked keys, not-yet-active keys, expired keys, malformed public keys, malformed signatures, and invalid signatures. The registry implements the existing `SignatureVerifier` trait using wall-clock validity and exposes `verify_at` for deterministic control-plane tests.
 
 The `ed25519-dalek` dependency is now pinned through the Rust lockfile. Validation evidence is 43 Rust tests (34 unit and 9 integration), clean formatting, clean clippy with warnings denied, and 9 Elixir tests. This does not complete Phase 2: durable key-registry persistence/atomic rotation, HSM or hardware-backed custody where required, replay/nonce persistence, cross-language vectors, and replicated-authority integration remain open.
+
+## 18. Phase 2 durable key-registry target — 2026-11-24
+
+The next implementation target has started in `rust/wallet-core/src/key_registry.rs`:
+
+- `PersistentKeyRegistry` stores only validated public Ed25519 records, signer bindings, validity windows, and revocation state.
+- Registry snapshots use a versioned `BWKR` format with bounded decoding, duplicate-ID rejection, invalid-key rejection, and trailing-data rejection.
+- Mutations write a fully validated temporary snapshot, flush it with `sync_all`, and atomically rename it before replacing the in-memory snapshot.
+- Rotation is all-or-nothing: the old key is retained and revoked while the replacement key is added in one durable snapshot update.
+- Recovery fails closed on malformed or truncated state; private keys, seeds, and credentials are not accepted by the record model or written to disk.
+
+Focused Rust tests were added for reopen persistence, atomic rotation, and corrupt-state rejection. Rust execution remains blocked in this environment until a Cargo toolchain that supports the inherited lockfile version 4 is installed; no lockfile or toolchain files were changed. The target remains in progress pending executable Rust verification, crash-injection coverage, directory-sync durability evidence, and integration with replay/nonce persistence.
+
+## 19. Phase 2 replay and nonce persistence target — 2026-11-24
+
+The next Phase 2 gate has started in `rust/wallet-core/src/replay.rs`:
+
+- `PersistentNonceRegistry` stores the `(signer, key_id, nonce, expiry)` replay tuple in a bounded versioned `BWNR` snapshot.
+- `verify_and_consume()` verifies the complete BWAU envelope before consuming a nonce; invalid signatures therefore cannot poison replay state.
+- Consumption is fail-closed and atomic: expired entries are removed from the candidate snapshot, duplicate tuples are rejected, the new snapshot is flushed and renamed, and only then is memory updated.
+- Restart recovery preserves consumed nonces; malformed, truncated, duplicate, zero-nonce, and over-capacity state is rejected.
+- The registry is public metadata only and has no private-key, seed, credential, or signer capability.
+
+Focused Rust tests cover persistence, duplicate rejection, verification-before-consumption, and corrupt-state rejection. This target remains in progress pending execution with a compatible Cargo toolchain, crash-injection testing, directory-sync durability evidence, and integration with the Python transport replay boundary.
+
+## 20. Phase 2 cross-language authenticated-wire vector target — 2026-11-24
+
+The authenticated transport vector target has started with `fixtures/bwau/evm_simulation_ticket_v1.json`. The vector contains exact BWAU envelope bytes, payload hash, BWAU signed-message bytes, complete-ticket transcript, ticket signature, and an Ed25519 public key only. It binds the canonical BW3C payload plus request identity, chain context, simulation hash, policy/capability/wallet identities, signer context, expiry, and nonce.
+
+Python, Elixir, and TypeScript now consume the vector and verify the exact BWAU and complete-ticket signatures through their respective cryptographic libraries. Rust remains the authoritative transcript producer through `ticket_binding_message()`. This remains an interoperability target rather than a completed Phase 2 exit. No private signing material, credentials, RPC endpoints, or live-chain data are present.

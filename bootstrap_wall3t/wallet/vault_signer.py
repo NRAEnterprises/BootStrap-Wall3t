@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-from typing import Any, Dict, Protocol
+from typing import Any, Dict, Mapping, Protocol
 
 from bootstrap_wall3t.chain.registry import get_provider
 
@@ -31,8 +31,21 @@ class VaultBackedSigner:
 
     minimum_key_bytes = 32
 
-    def __init__(self, vault: AgentKeyVault):
+    def __init__(
+        self,
+        vault: AgentKeyVault,
+        principal_to_agent: Mapping[str, str] | None = None,
+    ):
         self._vault = vault
+        self._principal_to_agent = dict(principal_to_agent or {})
+
+    def _agent_for_principal(self, principal: str) -> str:
+        if not principal or len(principal) > 128:
+            raise SigningUnavailable("Invalid authenticated principal")
+        agent_id = self._principal_to_agent.get(principal, principal)
+        if not agent_id or len(agent_id) > 128:
+            raise SigningUnavailable("Authenticated principal is not authorized for signing")
+        return agent_id
 
     @staticmethod
     def _key_name(chain: str) -> str:
@@ -60,10 +73,9 @@ class VaultBackedSigner:
             raise SigningUnavailable("Vault key material is too short")
         return key
 
-    def sign(self, chain: str, agent_id: str, unsigned_tx: Dict[str, Any]) -> Dict[str, Any]:
+    def sign(self, chain: str, principal: str, unsigned_tx: Dict[str, Any]) -> Dict[str, Any]:
         """Return a signed transaction without exposing the private key."""
-        if not agent_id or len(agent_id) > 128:
-            raise SigningUnavailable("Invalid agent identifier")
+        agent_id = self._agent_for_principal(principal)
 
         provider = get_provider(chain)
         try:

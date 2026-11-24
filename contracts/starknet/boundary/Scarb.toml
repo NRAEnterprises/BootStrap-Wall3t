@@ -1,0 +1,9 @@
+[package]
+name = "wall3t_boundary"
+version = "0.1.0"
+edition = "2024_07"
+
+[dependencies]
+
+[dev-dependencies]
+cairo_test = "2.21.0"

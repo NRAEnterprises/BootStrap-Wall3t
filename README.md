@@ -146,11 +146,35 @@ The **Node Manager** lets you start, stop, and monitor blockchain node services 
   - `GET   /nodes/{name}/status` – quick status via `docker compose ps`.
 - **Browser extension UI**: open the *Node Manager* page from the popup (link added) or navigate to `extension/nodes/index.html`. The page shows a table of nodes, their description, current status, and Start/Stop buttons.
 - **Background script messages**: the extension background now forwards `GET_NODES`, `START_NODE`, `STOP_NODE`, and `NODE_STATUS` messages to the FastAPI server.
-- **Security**: endpoints are protected by the placeholder JWT (`Authorization: Bearer dev-token`). Replace with real auth in production.
+- **Security**: every server start requires `DEV_TOKEN` and `JWT_SECRET` environment variables of at least 32 characters, plus the non-secret `JWT_ISSUER` and `JWT_AUDIENCE` settings. `DEV_TOKEN` and `JWT_SECRET` must be distinct; there are no insecure fallback values. Requests may authenticate with `Authorization: Bearer <DEV_TOKEN>` or a strict `HS256` JWT signed with `JWT_SECRET`.
+
+### Authentication configuration
+
+Generate separate high-entropy values before starting the server. Do not commit
+these values or place them in source files:
+
+```bash
+export DEV_TOKEN="$(openssl rand -base64 32)"
+export JWT_SECRET="$(openssl rand -base64 32)"
+export JWT_ISSUER="bootstrap-wall3t-auth"
+export JWT_AUDIENCE="bootstrap-wall3t-api"
+./scripts/run_server.sh
+```
+
+JWTs must use `typ: JWT` and `alg: HS256`, and must contain a non-empty `sub`,
+matching `iss` and `aud`, numeric `iat` and `exp` claims, and an optional
+numeric `nbf` claim. Tokens may be valid for no more than 15 minutes and are
+checked with a 30-second clock-skew allowance. The transaction signing route
+derives the agent identity from the authenticated principal and does not accept
+an `agent_id` in the request body. If a static `DEV_TOKEN` is used for
+signing, configure its server-side principal explicitly with
+`DEV_TOKEN_AGENT_ID`; otherwise static-token signing is rejected. The vault
+signer may also map an authenticated principal to a vault agent profile through
+its explicit `principal_to_agent` configuration.
 
 ### Quick test
 ```bash
-# start the dev server (requires poetry or uvicorn installed)
+# configure DEV_TOKEN and JWT_SECRET as shown above, then start the dev server
 ./scripts/run_server.sh &
 # then open the extension UI and click the "Node Manager" link.
 ```

@@ -215,7 +215,7 @@ impl AuthenticatedEnvelope {
             return Err(AuthError::UnsupportedVersion(version));
         }
         let kind = reader.u8()?;
-        if !(1..=6).contains(&kind) {
+        if !(1..=7).contains(&kind) {
             return Err(AuthError::InvalidKind);
         }
         let signer = reader.string(MAX_SIGNER_LEN)?;
@@ -272,6 +272,50 @@ pub fn payload_digest(kind: u8, payload: &[u8]) -> Sha256Digest {
     Sha256Digest(sha256(&input))
 }
 
+/// Canonical transcript for fields carried by the Python simulation DTO but not
+/// by the generic BWAU envelope. The wallet-core issuer signs this transcript
+/// with the same allowlisted key as the BWAU signed message. Keep this layout
+/// byte-identical with `wallet_core_gate._ticket_context_message`.
+pub fn ticket_binding_message(
+    chain_id: u64,
+    request_id: &str,
+    intent_id: &str,
+    wire_version: u16,
+    kind: u8,
+    payload: &[u8],
+    intent_digest: &[u8; 32],
+    registry_version: u64,
+    simulation_hash: &[u8; 32],
+    policy_id: &str,
+    capability_id: &str,
+    wallet_id: &str,
+    key_id: &str,
+    subject: &str,
+    expires_at_unix: u64,
+    nonce: &[u8; NONCE_LEN],
+) -> Vec<u8> {
+    let mut message = Vec::new();
+    message.extend_from_slice(b"BOOTSTRAP-WALL3T/AUTHENTICATED-TICKET/V1\0");
+    put_u16(1, &mut message);
+    put_u64(chain_id, &mut message);
+    put_str(request_id, &mut message);
+    put_str(intent_id, &mut message);
+    put_u16(wire_version, &mut message);
+    message.push(kind);
+    put_bytes(payload, &mut message);
+    message.extend_from_slice(intent_digest);
+    put_u64(registry_version, &mut message);
+    message.extend_from_slice(simulation_hash);
+    put_str(policy_id, &mut message);
+    put_str(capability_id, &mut message);
+    put_str(wallet_id, &mut message);
+    put_str(key_id, &mut message);
+    put_str(subject, &mut message);
+    put_u64(expires_at_unix, &mut message);
+    message.extend_from_slice(nonce);
+    message
+}
+
 fn validate_signer(signer: &str) -> Result<(), AuthError> {
     if signer.is_empty() || signer.len() > MAX_SIGNER_LEN || signer.chars().any(char::is_control) {
         return Err(AuthError::InvalidField("signer"));
@@ -306,7 +350,7 @@ fn validate_context(context: &BindingContext) -> Result<(), AuthError> {
 }
 
 fn validate_payload_header(kind: u8, payload: &[u8]) -> Result<(), AuthError> {
-    if !(1..=6).contains(&kind) {
+    if !(1..=7).contains(&kind) {
         return Err(AuthError::InvalidKind);
     }
     if payload.len() < 7 || &payload[..4] != b"BW3C" {
@@ -400,7 +444,7 @@ impl<'a> Reader<'a> {
 
 // Compact dependency-free SHA-256 implementation for hash binding. Signature
 // verification remains outside this function and must use a reviewed backend.
-fn sha256(input: &[u8]) -> [u8; 32] {
+pub(crate) fn sha256(input: &[u8]) -> [u8; 32] {
     const K: [u32; 64] = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
         0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,

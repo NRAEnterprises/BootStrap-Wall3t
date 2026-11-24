@@ -14,10 +14,14 @@ existing server middleware validates.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import hmac
+import json
 import os
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Any, Dict
 from bootstrap_wall3t.chain.registry import get_provider
 from bootstrap_wall3t.wallet.vault_signer import SigningUnavailable
@@ -29,14 +33,51 @@ class TxCreateRequest(BaseModel):
     params: Dict[str, Any]
 
 class TxSignRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
     unsigned_tx: Dict[str, Any]
-    agent_id: str
 
 class TxBroadcastRequest(BaseModel):
     signed_tx: Dict[str, Any]
 
 
-def _require_auth(request: Request):
+def _jwt_principal(token: str) -> str:
+    secret = os.getenv('JWT_SECRET')
+    if not secret or len(secret) < 32:
+        raise HTTPException(status_code=503, detail='Authentication is not configured securely')
+    try:
+        header_b64, payload_b64, signature_b64 = token.split('.')
+        padding = lambda value: value + '=' * (-len(value) % 4)
+        header = json.loads(base64.urlsafe_b64decode(padding(header_b64)))
+        if not isinstance(header, dict) or header.get('alg') != 'HS256':
+            raise ValueError
+        payload = json.loads(base64.urlsafe_b64decode(padding(payload_b64)))
+        if not isinstance(payload, dict):
+            raise ValueError
+        signed = f'{header_b64}.{payload_b64}'.encode()
+        expected = hmac.new(secret.encode(), signed, hashlib.sha256).digest()
+        actual = base64.urlsafe_b64decode(padding(signature_b64))
+        if not hmac.compare_digest(expected, actual):
+            raise ValueError
+        principal = payload.get('sub')
+        if not isinstance(principal, str) or not principal or len(principal) > 128:
+            raise ValueError
+        return principal
+    except (
+        ValueError,
+        TypeError,
+        KeyError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        binascii.Error,
+    ) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail='Invalid authenticated principal',
+        ) from exc
+
+
+def _require_auth(request: Request) -> str | None:
     # Keep this router fail-closed when mounted independently from the main app.
     auth = request.headers.get('Authorization')
     if not auth or not auth.startswith('Bearer '):
@@ -45,8 +86,13 @@ def _require_auth(request: Request):
     configured_token = os.getenv('DEV_TOKEN')
     if not configured_token or len(configured_token) < 32:
         raise HTTPException(status_code=503, detail='Authentication is not configured securely')
-    if not hmac.compare_digest(token, configured_token):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid token')
+    if hmac.compare_digest(token, configured_token):
+        principal = os.getenv('DEV_TOKEN_AGENT_ID')
+        request.state.principal = principal
+        return principal
+    principal = _jwt_principal(token)
+    request.state.principal = principal
+    return principal
 
 
 @router.post('/{chain}/create', response_model=Dict[str, Any])
@@ -65,7 +111,9 @@ async def create_tx(chain: str, request: Request, body: TxCreateRequest):
 
 @router.post('/{chain}/sign', response_model=Dict[str, Any])
 async def sign_tx(chain: str, request: Request, body: TxSignRequest):
-    _require_auth(request)
+    principal = _require_auth(request)
+    if not principal:
+        raise HTTPException(status_code=403, detail='Authenticated principal is not authorized for signing')
     signer = getattr(request.app.state, 'tx_signer', None)
     if signer is None:
         raise HTTPException(
@@ -73,7 +121,7 @@ async def sign_tx(chain: str, request: Request, body: TxSignRequest):
             detail='Transaction signing is unavailable until a vault-backed signer is configured',
         )
     try:
-        return signer.sign(chain, body.agent_id, body.unsigned_tx)
+        return signer.sign(chain, principal, body.unsigned_tx)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f'Chain {chain!r} not supported') from exc
     except SigningUnavailable as exc:

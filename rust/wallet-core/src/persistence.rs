@@ -123,7 +123,7 @@ fn parse_records(bytes: &[u8]) -> Result<Vec<JournalRecord>, JournalError> {
             return Err(JournalError::Corrupt("unsupported frame version"));
         }
         let kind = body[6];
-        if !(1..=6).contains(&kind) {
+        if !(1..=7).contains(&kind) {
             return Err(JournalError::Corrupt("unknown record kind"));
         }
         let payload_len = u32::from_be_bytes([body[7], body[8], body[9], body[10]]) as usize;

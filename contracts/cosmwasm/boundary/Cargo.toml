@@ -1,0 +1,12 @@
+[package]
+name = "wall3t-cosmwasm-boundary"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cosmwasm-std = "2.2"
+thiserror = "2"

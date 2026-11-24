@@ -1,0 +1,9 @@
+[[package]]
+name = "std"
+version = "0.72.1"
+source = "registry+std?0.72.1#Qmaei2ndDdVnwaBbe58vi6dwH1i5qs16wkLRfa6hnPeskK!"
+
+[[package]]
+name = "wall3t_boundary"
+source = "member"
+dependencies = ["std"]

@@ -1,0 +1,6 @@
+[package]
+name = "Wall3tBoundary"
+version = "0.1.0"
+
+[addresses]
+wall3t_boundary = "0x0"

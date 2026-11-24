@@ -11,8 +11,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod authenticated;
 pub mod domain;
+pub mod evm_intent;
 pub mod key_registry;
 pub mod persistence;
+pub mod replay;
 pub mod wire;
 
 pub type RegistryVersion = u64;

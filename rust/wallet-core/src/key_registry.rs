@@ -6,6 +6,9 @@
 //! an Ed25519 signature is accepted.
 
 use std::collections::BTreeMap;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -44,6 +47,10 @@ pub enum KeyRegistryError {
     InvalidSignatureLength,
     InvalidSignature,
     RegistryUnavailable,
+    PersistenceIo,
+    PersistenceCorrupt,
+    RotationSourceNotFound,
+    RotationDestinationExists,
 }
 
 impl std::fmt::Display for KeyRegistryError {
@@ -63,6 +70,10 @@ impl std::fmt::Display for KeyRegistryError {
             Self::InvalidSignatureLength => write!(f, "signature is not an Ed25519 signature"),
             Self::InvalidSignature => write!(f, "Ed25519 signature is invalid"),
             Self::RegistryUnavailable => write!(f, "key registry lock is unavailable"),
+            Self::PersistenceIo => write!(f, "key registry persistence I/O failed"),
+            Self::PersistenceCorrupt => write!(f, "key registry persistence is corrupt"),
+            Self::RotationSourceNotFound => write!(f, "key rotation source was not found"),
+            Self::RotationDestinationExists => write!(f, "key rotation destination already exists"),
         }
     }
 }
@@ -144,6 +155,288 @@ impl KeyRegistry {
             }
         }
     }
+
+    fn snapshot(&self) -> Result<BTreeMap<String, RegisteredKey>, KeyRegistryError> {
+        self.keys
+            .read()
+            .map_err(|_| KeyRegistryError::RegistryUnavailable)
+            .map(|keys| keys.clone())
+    }
+
+    fn replace_snapshot(
+        &self,
+        snapshot: BTreeMap<String, RegisteredKey>,
+    ) -> Result<(), KeyRegistryError> {
+        let mut keys = self
+            .keys
+            .write()
+            .map_err(|_| KeyRegistryError::RegistryUnavailable)?;
+        *keys = snapshot;
+        Ok(())
+    }
+}
+
+const REGISTRY_MAGIC: &[u8; 4] = b"BWKR";
+const REGISTRY_VERSION: u16 = 1;
+
+/// A local durable registry reference implementation. Only public verification
+/// records are serialized. Mutations are written to a validated temporary file,
+/// flushed, and atomically renamed before the in-memory snapshot is replaced.
+pub struct PersistentKeyRegistry {
+    path: PathBuf,
+    registry: KeyRegistry,
+}
+
+impl PersistentKeyRegistry {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, KeyRegistryError> {
+        let path = path.as_ref().to_path_buf();
+        let snapshot = if path.exists() {
+            decode_snapshot(&fs::read(&path).map_err(|_| KeyRegistryError::PersistenceIo)?)?
+        } else {
+            BTreeMap::new()
+        };
+        let registry = KeyRegistry::new();
+        registry.replace_snapshot(snapshot)?;
+        let durable = Self { path, registry };
+        if !durable.path.exists() {
+            durable.persist_snapshot(&BTreeMap::new())?;
+        }
+        Ok(durable)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn register(&self, key: RegisteredKey) -> Result<(), KeyRegistryError> {
+        validate_key_record(&key)?;
+        let mut snapshot = self.registry.snapshot()?;
+        if snapshot.contains_key(&key.key_id) {
+            return Err(KeyRegistryError::DuplicateKeyId);
+        }
+        snapshot.insert(key.key_id.clone(), key);
+        self.persist_snapshot(&snapshot)?;
+        self.registry.replace_snapshot(snapshot)
+    }
+
+    pub fn revoke(&self, key_id: &str) -> Result<(), KeyRegistryError> {
+        let mut snapshot = self.registry.snapshot()?;
+        let key = snapshot
+            .get_mut(key_id)
+            .ok_or(KeyRegistryError::KeyNotFound)?;
+        key.revoked = true;
+        self.persist_snapshot(&snapshot)?;
+        self.registry.replace_snapshot(snapshot)
+    }
+
+    /// Replace one active key with a new key as one durable snapshot update.
+    /// The old key is revoked, never deleted, preserving auditability and making
+    /// stale envelopes fail closed after a successful rotation.
+    pub fn rotate(
+        &self,
+        old_key_id: &str,
+        replacement: RegisteredKey,
+    ) -> Result<(), KeyRegistryError> {
+        validate_key_record(&replacement)?;
+        let mut snapshot = self.registry.snapshot()?;
+        if !snapshot.contains_key(old_key_id) {
+            return Err(KeyRegistryError::RotationSourceNotFound);
+        }
+        if snapshot.contains_key(&replacement.key_id) {
+            return Err(KeyRegistryError::RotationDestinationExists);
+        }
+        snapshot
+            .get_mut(old_key_id)
+            .expect("source checked above")
+            .revoked = true;
+        snapshot.insert(replacement.key_id.clone(), replacement);
+        self.persist_snapshot(&snapshot)?;
+        self.registry.replace_snapshot(snapshot)
+    }
+
+    pub fn get(&self, key_id: &str) -> Result<RegisteredKey, KeyRegistryError> {
+        self.registry.get(key_id)
+    }
+
+    pub fn verify_at(
+        &self,
+        signer: &str,
+        key_id: &str,
+        message: &[u8],
+        signature: &[u8],
+        now_unix: u64,
+    ) -> Result<(), KeyRegistryError> {
+        self.registry
+            .verify_at(signer, key_id, message, signature, now_unix)
+    }
+
+    fn persist_snapshot(
+        &self,
+        snapshot: &BTreeMap<String, RegisteredKey>,
+    ) -> Result<(), KeyRegistryError> {
+        let temporary = self.path.with_extension("tmp");
+        let bytes = encode_snapshot(snapshot)?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&temporary)
+            .map_err(|_| KeyRegistryError::PersistenceIo)?;
+        file.write_all(&bytes)
+            .and_then(|_| file.sync_all())
+            .map_err(|_| KeyRegistryError::PersistenceIo)?;
+        drop(file);
+        fs::rename(&temporary, &self.path).map_err(|_| KeyRegistryError::PersistenceIo)
+    }
+}
+
+impl SignatureVerifier for PersistentKeyRegistry {
+    fn verify(&self, signer: &str, key_id: &str, message: &[u8], signature: &[u8]) -> bool {
+        self.verify_at(signer, key_id, message, signature, current_unix())
+            .is_ok()
+    }
+}
+
+fn encode_snapshot(
+    snapshot: &BTreeMap<String, RegisteredKey>,
+) -> Result<Vec<u8>, KeyRegistryError> {
+    let count = u32::try_from(snapshot.len()).map_err(|_| KeyRegistryError::PersistenceCorrupt)?;
+    let mut out = Vec::new();
+    out.extend_from_slice(REGISTRY_MAGIC);
+    out.extend_from_slice(&REGISTRY_VERSION.to_be_bytes());
+    out.extend_from_slice(&count.to_be_bytes());
+    for key in snapshot.values() {
+        validate_key_record(key)?;
+        put_string(&key.key_id, &mut out)?;
+        put_string(&key.signer, &mut out)?;
+        out.push(match key.algorithm {
+            KeyAlgorithm::Ed25519 => 1,
+        });
+        out.extend_from_slice(&key.public_key);
+        out.extend_from_slice(&key.not_before_unix.to_be_bytes());
+        match key.expires_at_unix {
+            Some(value) => {
+                out.push(1);
+                out.extend_from_slice(&value.to_be_bytes());
+            }
+            None => out.push(0),
+        }
+        out.push(u8::from(key.revoked));
+    }
+    Ok(out)
+}
+
+fn decode_snapshot(bytes: &[u8]) -> Result<BTreeMap<String, RegisteredKey>, KeyRegistryError> {
+    let mut reader = RegistryReader { bytes, cursor: 0 };
+    if reader.take(4)? != REGISTRY_MAGIC || reader.u16()? != REGISTRY_VERSION {
+        return Err(KeyRegistryError::PersistenceCorrupt);
+    }
+    let count = reader.u32()? as usize;
+    if count > 10_000 {
+        return Err(KeyRegistryError::PersistenceCorrupt);
+    }
+    let mut snapshot = BTreeMap::new();
+    for _ in 0..count {
+        let key_id = reader.string(256)?;
+        let signer = reader.string(256)?;
+        let algorithm = match reader.u8()? {
+            1 => KeyAlgorithm::Ed25519,
+            _ => return Err(KeyRegistryError::UnsupportedAlgorithm),
+        };
+        let public_bytes = reader.take(32)?;
+        let mut public_key = [0u8; 32];
+        public_key.copy_from_slice(public_bytes);
+        let not_before_unix = reader.u64()?;
+        let expires_at_unix = match reader.u8()? {
+            0 => None,
+            1 => Some(reader.u64()?),
+            _ => return Err(KeyRegistryError::PersistenceCorrupt),
+        };
+        let revoked = match reader.u8()? {
+            0 => false,
+            1 => true,
+            _ => return Err(KeyRegistryError::PersistenceCorrupt),
+        };
+        let key = RegisteredKey {
+            key_id: key_id.clone(),
+            signer,
+            algorithm,
+            public_key,
+            not_before_unix,
+            expires_at_unix,
+            revoked,
+        };
+        validate_key_record(&key)?;
+        if snapshot.insert(key_id, key).is_some() {
+            return Err(KeyRegistryError::PersistenceCorrupt);
+        }
+    }
+    if !reader.empty() {
+        return Err(KeyRegistryError::PersistenceCorrupt);
+    }
+    Ok(snapshot)
+}
+
+fn put_string(value: &str, out: &mut Vec<u8>) -> Result<(), KeyRegistryError> {
+    let bytes = value.as_bytes();
+    let length = u32::try_from(bytes.len()).map_err(|_| KeyRegistryError::PersistenceCorrupt)?;
+    out.extend_from_slice(&length.to_be_bytes());
+    out.extend_from_slice(bytes);
+    Ok(())
+}
+
+struct RegistryReader<'a> {
+    bytes: &'a [u8],
+    cursor: usize,
+}
+
+impl<'a> RegistryReader<'a> {
+    fn take(&mut self, length: usize) -> Result<&'a [u8], KeyRegistryError> {
+        let end = self
+            .cursor
+            .checked_add(length)
+            .ok_or(KeyRegistryError::PersistenceCorrupt)?;
+        if end > self.bytes.len() {
+            return Err(KeyRegistryError::PersistenceCorrupt);
+        }
+        let result = &self.bytes[self.cursor..end];
+        self.cursor = end;
+        Ok(result)
+    }
+
+    fn u8(&mut self) -> Result<u8, KeyRegistryError> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn u16(&mut self) -> Result<u16, KeyRegistryError> {
+        let bytes = self.take(2)?;
+        Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+    }
+
+    fn u32(&mut self) -> Result<u32, KeyRegistryError> {
+        let bytes = self.take(4)?;
+        Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    }
+
+    fn u64(&mut self) -> Result<u64, KeyRegistryError> {
+        let bytes = self.take(8)?;
+        Ok(u64::from_be_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ]))
+    }
+
+    fn string(&mut self, max: usize) -> Result<String, KeyRegistryError> {
+        let length = self.u32()? as usize;
+        if length > max {
+            return Err(KeyRegistryError::PersistenceCorrupt);
+        }
+        String::from_utf8(self.take(length)?.to_vec())
+            .map_err(|_| KeyRegistryError::PersistenceCorrupt)
+    }
+
+    fn empty(&self) -> bool {
+        self.cursor == self.bytes.len()
+    }
 }
 
 impl SignatureVerifier for KeyRegistry {
@@ -166,6 +459,12 @@ fn validate_key_record(key: &RegisteredKey) -> Result<(), KeyRegistryError> {
     {
         return Err(KeyRegistryError::InvalidValidityWindow);
     }
+    match key.algorithm {
+        KeyAlgorithm::Ed25519 => {
+            VerifyingKey::from_bytes(&key.public_key)
+                .map_err(|_| KeyRegistryError::InvalidPublicKey)?;
+        }
+    }
     Ok(())
 }
 
@@ -186,6 +485,7 @@ mod tests {
     };
     use ed25519_dalek::{Signer, SigningKey};
     use std::collections::BTreeSet;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn policy() -> AutomationPolicy {
         let mut chains = BTreeSet::new();
@@ -225,6 +525,14 @@ mod tests {
             expires_at_unix: None,
             revoked: false,
         }
+    }
+
+    fn temp_path(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!("bootstrap-wall3t-key-{label}-{nonce}.bin"))
     }
 
     fn envelope(signing_key: &SigningKey) -> AuthenticatedEnvelope {
@@ -360,5 +668,47 @@ mod tests {
             registry.register(key_record(&signing_key)),
             Err(KeyRegistryError::DuplicateKeyId)
         );
+    }
+
+    #[test]
+    fn persistent_registry_reopens_public_key_records() {
+        let path = temp_path("roundtrip");
+        let signing_key = SigningKey::from_bytes(&[9; 32]);
+        let registry = PersistentKeyRegistry::open(&path).expect("open");
+        registry.register(key_record(&signing_key)).expect("register");
+        drop(registry);
+        let reopened = PersistentKeyRegistry::open(&path).expect("reopen");
+        assert_eq!(reopened.get("key-1").expect("key").public_key, signing_key.verifying_key().to_bytes());
+        std::fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn rotation_revokes_old_key_and_persists_replacement_atomically() {
+        let path = temp_path("rotation");
+        let first = SigningKey::from_bytes(&[10; 32]);
+        let second = SigningKey::from_bytes(&[11; 32]);
+        let registry = PersistentKeyRegistry::open(&path).expect("open");
+        registry.register(key_record(&first)).expect("register");
+        let mut replacement = key_record(&second);
+        replacement.key_id = "key-2".into();
+        registry.rotate("key-1", replacement).expect("rotate");
+        assert!(registry.get("key-1").expect("old").revoked);
+        assert!(!registry.get("key-2").expect("new").revoked);
+        drop(registry);
+        let reopened = PersistentKeyRegistry::open(&path).expect("reopen");
+        assert!(reopened.get("key-1").expect("old").revoked);
+        assert!(!reopened.get("key-2").expect("new").revoked);
+        std::fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn persistent_registry_rejects_corrupt_state() {
+        let path = temp_path("corrupt");
+        std::fs::write(&path, b"BWKR\0\x01\0\0\0\0\x01").expect("write");
+        assert!(matches!(
+            PersistentKeyRegistry::open(&path),
+            Err(KeyRegistryError::PersistenceCorrupt)
+        ));
+        std::fs::remove_file(path).expect("cleanup");
     }
 }
