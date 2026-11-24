@@ -525,3 +525,9 @@ Focused Rust tests cover persistence, duplicate rejection, verification-before-c
 The authenticated transport vector target has started with `fixtures/bwau/evm_simulation_ticket_v1.json`. The vector contains exact BWAU envelope bytes, payload hash, BWAU signed-message bytes, complete-ticket transcript, ticket signature, and an Ed25519 public key only. It binds the canonical BW3C payload plus request identity, chain context, simulation hash, policy/capability/wallet identities, signer context, expiry, and nonce.
 
 Python, Elixir, and TypeScript now consume the vector and verify the exact BWAU and complete-ticket signatures through their respective cryptographic libraries. Rust remains the authoritative transcript producer through `ticket_binding_message()`. This remains an interoperability target rather than a completed Phase 2 exit. No private signing material, credentials, RPC endpoints, or live-chain data are present.
+
+## 21. Phase 2 Python replay-boundary integration — 2026-11-24
+
+`bootstrap_wall3t/chain/replay.py` now provides a Python `PersistentNonceRegistry` using the Rust-compatible `BWNR` v1 snapshot format. It persists only signer, key ID, nonce, and expiry metadata; writes are flushed and atomically replaced; malformed, truncated, duplicate, zero-nonce, expired, and over-capacity state fails closed.
+
+`verify_and_consume()` validates the complete authenticated simulation ticket before consuming its nonce, so invalid signatures cannot poison replay state. Reopening the registry preserves consumed nonces, and fixture-backed tests cover persistence, duplicate rejection, verification-before-consumption, and corrupt-state rejection. This remains a local durability boundary pending authenticated service transport and crash-injection evidence.
