@@ -35,7 +35,7 @@ PY
 )"
 
 /home/ubuntu/.cargo/bin/cargo +stable build --manifest-path "$repo_root/rust/Cargo.toml" --bin wallet_core_socket --quiet
-"$repo_root/rust/target/debug/wallet_core_socket" "$socket_path" "$signer" "$key_id" "$public_key" "$replay_path" 1700000000 &
+"$repo_root/rust/target/debug/wallet_core_socket" "$socket_path" "$signer" "$key_id" "$public_key" "$replay_path" 1700000000 development &
 service_pid=$!
 for _ in $(seq 1 50); do [[ -S "$socket_path" ]] && break; sleep 0.02; done
 [[ -S "$socket_path" ]] || { echo "socket service did not start" >&2; exit 1; }

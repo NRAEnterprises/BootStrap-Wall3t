@@ -15,6 +15,7 @@ use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use wallet_core::authenticated::AuthenticatedEnvelope;
+use wallet_core::ipc::{authorize_peer, IpcProfile};
 use wallet_core::key_registry::{KeyAlgorithm, KeyRegistry, RegisteredKey};
 use wallet_core::replay::PersistentNonceRegistry;
 
@@ -35,9 +36,9 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
-    if args.len() != 7 {
+    if args.len() != 8 {
         return Err(format!(
-            "usage: {} <socket> <signer> <key-id> <public-key-hex> <replay-file> <now-unix>",
+            "usage: {} <socket> <signer> <key-id> <public-key-hex> <replay-file> <now-unix> <ipc-profile>",
             args[0]
         ));
     }
@@ -49,6 +50,9 @@ fn run() -> Result<(), String> {
     let now_unix = args[6]
         .parse::<u64>()
         .map_err(|_| "now-unix must be a non-negative integer".to_owned())?;
+    let (current_uid, current_gid) = unsafe { (geteuid(), getegid()) };
+    let profile = IpcProfile::parse(&args[7], current_uid, current_gid)
+        .map_err(|error| format!("IPC profile rejected: {error}"))?;
 
     prepare_socket_path(socket_path)?;
     let registry = KeyRegistry::new();
@@ -68,12 +72,19 @@ fn run() -> Result<(), String> {
     // Apply the restrictive umask before bind so there is no permissive creation window.
     unsafe { umask(0o077) };
     let listener = UnixListener::bind(socket_path).map_err(|_| "cannot bind socket".to_owned())?;
-    harden_socket(socket_path)?;
+    if let Err(error) = harden_socket(socket_path, profile) {
+        // Do not expose a socket after a profile or ownership check fails.
+        let _ = fs::remove_file(socket_path);
+        return Err(error);
+    }
 
     for connection in listener.incoming() {
         match connection {
             Ok(mut stream) => {
-                let response = handle_request(&mut stream, &registry, &replay, now_unix);
+                let response = match authorize_peer(&stream, profile) {
+                    Ok(_) => handle_request(&mut stream, &registry, &replay, now_unix),
+                    Err(error) => format!("ERR peer:{error}\n"),
+                };
                 write_frame(&mut stream, response.as_bytes())?;
             }
             Err(error) => eprintln!("wallet-core socket accept error: {error}"),
@@ -100,20 +111,21 @@ fn prepare_socket_path(socket_path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn harden_socket(socket_path: &str) -> Result<(), String> {
+fn harden_socket(socket_path: &str, profile: IpcProfile) -> Result<(), String> {
     let path = Path::new(socket_path);
     let mut permissions = fs::metadata(path)
         .map_err(|_| "cannot inspect bound socket".to_owned())?
         .permissions();
-    permissions.set_mode(0o600);
+    permissions.set_mode(profile.socket_mode());
     fs::set_permissions(path, permissions).map_err(|_| "cannot restrict socket mode".to_owned())?;
     let metadata = fs::metadata(path).map_err(|_| "cannot re-inspect bound socket".to_owned())?;
-    if metadata.mode() & 0o7777 != 0o600 {
-        return Err("socket mode is not 0600".to_owned());
+    if metadata.mode() & 0o7777 != profile.socket_mode() {
+        return Err("socket mode does not match the selected IPC profile".to_owned());
     }
-    let (uid, gid) = unsafe { (geteuid(), getegid()) };
-    if metadata.uid() != uid || metadata.gid() != gid {
-        return Err("socket ownership does not match the service process".to_owned());
+    let (uid, _) = unsafe { (geteuid(), getegid()) };
+    let (_, expected_gid) = profile.expected_peer();
+    if metadata.uid() != uid || metadata.gid() != expected_gid {
+        return Err("socket ownership does not match the selected IPC profile".to_owned());
     }
     Ok(())
 }

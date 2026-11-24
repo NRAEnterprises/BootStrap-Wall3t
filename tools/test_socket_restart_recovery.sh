@@ -41,7 +41,7 @@ PY
 binary="$repo_root/rust/target/debug/wallet_core_socket"
 
 start_service() {
-  "$binary" "$socket_path" "$signer" "$key_id" "$public_key" "$replay_path" 1700000000 &
+  "$binary" "$socket_path" "$signer" "$key_id" "$public_key" "$replay_path" 1700000000 development &
   service_pid=$!
   for _ in $(seq 1 50); do
     [[ -S "$socket_path" ]] && return 0
@@ -86,7 +86,7 @@ wait "$service_pid" 2>/dev/null || true
 service_pid=""
 rm -f "$socket_path"
 printf 'not-a-BWNR-journal' > "$replay_path"
-if "$binary" "$socket_path" "$signer" "$key_id" "$public_key" "$replay_path" 1700000000 >/dev/null 2>&1; then
+if "$binary" "$socket_path" "$signer" "$key_id" "$public_key" "$replay_path" 1700000000 development >/dev/null 2>&1; then
   echo "corrupt replay state unexpectedly allowed service startup" >&2
   exit 1
 fi
