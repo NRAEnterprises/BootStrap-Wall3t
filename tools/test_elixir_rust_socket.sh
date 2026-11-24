@@ -39,6 +39,8 @@ PY
 service_pid=$!
 for _ in $(seq 1 50); do [[ -S "$socket_path" ]] && break; sleep 0.02; done
 [[ -S "$socket_path" ]] || { echo "socket service did not start" >&2; exit 1; }
+[[ "$(stat -c '%a' "$socket_path")" == "600" ]] || { echo "socket mode is not 0600" >&2; exit 1; }
+[[ "$(stat -c '%u' "$socket_path")" == "$EUID" ]] || { echo "socket owner is not the service process owner" >&2; exit 1; }
 
 cd "$repo_root/elixir/wall3t_orchestrator"
 export WALL3T_SOCKET_PATH="$socket_path"

@@ -7,6 +7,8 @@
 use std::env;
 use std::fs;
 use std::io::{Read, Write};
+use std::os::raw::c_uint;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::process;
@@ -17,6 +19,12 @@ use wallet_core::key_registry::{KeyAlgorithm, KeyRegistry, RegisteredKey};
 use wallet_core::replay::PersistentNonceRegistry;
 
 const MAX_FRAME: usize = 8 * 1024 * 1024;
+
+unsafe extern "C" {
+    fn umask(mask: c_uint) -> c_uint;
+    fn geteuid() -> c_uint;
+    fn getegid() -> c_uint;
+}
 
 fn main() {
     if let Err(error) = run() {
@@ -42,9 +50,7 @@ fn run() -> Result<(), String> {
         .parse::<u64>()
         .map_err(|_| "now-unix must be a non-negative integer".to_owned())?;
 
-    if Path::new(socket_path).exists() {
-        fs::remove_file(socket_path).map_err(|_| "cannot remove existing socket".to_owned())?;
-    }
+    prepare_socket_path(socket_path)?;
     let registry = KeyRegistry::new();
     registry
         .register(RegisteredKey {
@@ -59,7 +65,10 @@ fn run() -> Result<(), String> {
         .map_err(|error| format!("key registration failed: {error}"))?;
     let replay = PersistentNonceRegistry::open(replay_path)
         .map_err(|error| format!("replay registry failed: {error}"))?;
+    // Apply the restrictive umask before bind so there is no permissive creation window.
+    unsafe { umask(0o077) };
     let listener = UnixListener::bind(socket_path).map_err(|_| "cannot bind socket".to_owned())?;
+    harden_socket(socket_path)?;
 
     for connection in listener.incoming() {
         match connection {
@@ -69,6 +78,42 @@ fn run() -> Result<(), String> {
             }
             Err(error) => eprintln!("wallet-core socket accept error: {error}"),
         }
+    }
+    Ok(())
+}
+
+fn prepare_socket_path(socket_path: &str) -> Result<(), String> {
+    let path = Path::new(socket_path);
+    if path.symlink_metadata().is_ok() {
+        return Err("refusing to replace an existing socket path".to_owned());
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let metadata = fs::metadata(parent).map_err(|_| "socket parent is unavailable".to_owned())?;
+    if !metadata.is_dir() {
+        return Err("socket parent is not a directory".to_owned());
+    }
+    let mode = metadata.mode();
+    // A sticky directory such as /tmp is acceptable; otherwise reject group/other writes.
+    if mode & 0o0022 != 0 && mode & 0o1000 == 0 {
+        return Err("socket parent is writable by group or other".to_owned());
+    }
+    Ok(())
+}
+
+fn harden_socket(socket_path: &str) -> Result<(), String> {
+    let path = Path::new(socket_path);
+    let mut permissions = fs::metadata(path)
+        .map_err(|_| "cannot inspect bound socket".to_owned())?
+        .permissions();
+    permissions.set_mode(0o600);
+    fs::set_permissions(path, permissions).map_err(|_| "cannot restrict socket mode".to_owned())?;
+    let metadata = fs::metadata(path).map_err(|_| "cannot re-inspect bound socket".to_owned())?;
+    if metadata.mode() & 0o7777 != 0o600 {
+        return Err("socket mode is not 0600".to_owned());
+    }
+    let (uid, gid) = unsafe { (geteuid(), getegid()) };
+    if metadata.uid() != uid || metadata.gid() != gid {
+        return Err("socket ownership does not match the service process".to_owned());
     }
     Ok(())
 }
