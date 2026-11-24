@@ -531,3 +531,9 @@ Python, Elixir, and TypeScript now consume the vector and verify the exact BWAU 
 `bootstrap_wall3t/chain/replay.py` now provides a Python `PersistentNonceRegistry` using the Rust-compatible `BWNR` v1 snapshot format. It persists only signer, key ID, nonce, and expiry metadata; writes are flushed and atomically replaced; malformed, truncated, duplicate, zero-nonce, expired, and over-capacity state fails closed.
 
 `verify_and_consume()` validates the complete authenticated simulation ticket before consuming its nonce, so invalid signatures cannot poison replay state. Reopening the registry preserves consumed nonces, and fixture-backed tests cover persistence, duplicate rejection, verification-before-consumption, and corrupt-state rejection. This remains a local durability boundary pending authenticated service transport and crash-injection evidence.
+
+## 22. Phase 2 Elixir authenticated transport decoder — 2026-11-24
+
+`Wall3t.BW3C.Bwau` now provides a strict Elixir BWAU v1 decoder for the management-plane transport boundary. It enforces bounded length-prefixed fields, UTF-8 and control-character checks, supported envelope identity, non-zero registry/nonce context, expiry, exact payload hashing, trailing-byte rejection, and Ed25519 verification against an externally supplied public key.
+
+The decoder returns only validated public envelope metadata and payload bytes. It accepts no private-key material and has no signing or broadcast capability. Fixture-backed ExUnit coverage verifies the shared authenticated vector plus expiry, hash mutation, and trailing-byte rejection. The Elixir suite passes 20 tests; authenticated service transport and Rust-client integration remain open.
