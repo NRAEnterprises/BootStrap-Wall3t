@@ -12,10 +12,11 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::process;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use wallet_core::authenticated::AuthenticatedEnvelope;
-use wallet_core::ipc::{authorize_peer, IpcProfile};
+use wallet_core::ipc::{authorize_peer, IpcProfile, TransportConfig};
 use wallet_core::key_registry::{KeyAlgorithm, KeyRegistry, RegisteredKey};
 use wallet_core::replay::PersistentNonceRegistry;
 
@@ -78,19 +79,85 @@ fn run() -> Result<(), String> {
         return Err(error);
     }
 
+    let transport = TransportConfig::default()
+        .validate()
+        .map_err(|error| format!("transport configuration invalid: {error}"))?;
+    let (sender, receiver) = mpsc::sync_channel::<UnixStream>(transport.queue_capacity);
+    let receiver = Arc::new(Mutex::new(receiver));
+    let registry = Arc::new(registry);
+    let replay = Arc::new(replay);
+    for _ in 0..transport.worker_count {
+        let receiver = Arc::clone(&receiver);
+        let registry = Arc::clone(&registry);
+        let replay = Arc::clone(&replay);
+        let spawn_result = std::thread::Builder::new()
+            .name("wallet-core-ipc".to_owned())
+            .spawn(move || worker_loop(receiver, registry, replay, now_unix, profile, transport));
+        if spawn_result.is_err() {
+            let _ = fs::remove_file(socket_path);
+            return Err("cannot spawn IPC worker".to_owned());
+        }
+    }
+
     for connection in listener.incoming() {
         match connection {
-            Ok(mut stream) => {
-                let response = match authorize_peer(&stream, profile) {
-                    Ok(_) => handle_request(&mut stream, &registry, &replay, now_unix),
-                    Err(error) => format!("ERR peer:{error}\n"),
-                };
-                write_frame(&mut stream, response.as_bytes())?;
+            Ok(stream) => {
+                // Never wait for a worker here. A full bounded queue closes the
+                // connection instead of allowing an attacker to stall accept.
+                if sender.try_send(stream).is_err() {
+                    continue;
+                }
             }
             Err(error) => eprintln!("wallet-core socket accept error: {error}"),
         }
     }
     Ok(())
+}
+
+fn worker_loop(
+    receiver: Arc<Mutex<mpsc::Receiver<UnixStream>>>,
+    registry: Arc<KeyRegistry>,
+    replay: Arc<PersistentNonceRegistry>,
+    now_unix: u64,
+    profile: IpcProfile,
+    transport: TransportConfig,
+) {
+    loop {
+        let stream = match receiver
+            .lock()
+            .expect("IPC worker receiver poisoned")
+            .recv()
+        {
+            Ok(stream) => stream,
+            Err(_) => return,
+        };
+        serve_connection(stream, &registry, &replay, now_unix, profile, transport);
+    }
+}
+
+fn serve_connection(
+    mut stream: UnixStream,
+    registry: &KeyRegistry,
+    replay: &PersistentNonceRegistry,
+    now_unix: u64,
+    profile: IpcProfile,
+    transport: TransportConfig,
+) {
+    if stream
+        .set_read_timeout(Some(transport.read_timeout))
+        .is_err()
+        || stream
+            .set_write_timeout(Some(transport.write_timeout))
+            .is_err()
+    {
+        return;
+    }
+
+    let response = match authorize_peer(&stream, profile) {
+        Ok(_) => handle_request(&mut stream, registry, replay, now_unix),
+        Err(error) => format!("ERR peer:{error}\n"),
+    };
+    let _ = write_frame(&mut stream, response.as_bytes());
 }
 
 fn prepare_socket_path(socket_path: &str) -> Result<(), String> {

@@ -6,6 +6,46 @@
 //! development profile.
 
 use std::fmt;
+use std::time::Duration;
+
+/// Bounded transport resources for the local socket endpoint.
+///
+/// These values are intentionally fixed in the binary. Production deployment
+/// may choose a reviewed build-time profile, but an untrusted environment must
+/// not be able to turn the endpoint into an unbounded connection or queue.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TransportConfig {
+    pub worker_count: usize,
+    pub queue_capacity: usize,
+    pub read_timeout: Duration,
+    pub write_timeout: Duration,
+}
+
+impl Default for TransportConfig {
+    fn default() -> Self {
+        Self {
+            worker_count: 4,
+            queue_capacity: 16,
+            read_timeout: Duration::from_secs(5),
+            write_timeout: Duration::from_secs(5),
+        }
+    }
+}
+
+impl TransportConfig {
+    pub fn validate(self) -> Result<Self, &'static str> {
+        if self.worker_count == 0 {
+            return Err("worker count must be positive");
+        }
+        if self.queue_capacity == 0 {
+            return Err("queue capacity must be positive");
+        }
+        if self.read_timeout.is_zero() || self.write_timeout.is_zero() {
+            return Err("transport timeouts must be positive");
+        }
+        Ok(self)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IpcProfile {
@@ -230,6 +270,36 @@ impl std::error::Error for IpcProfileError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_transport_limits_are_bounded_and_valid() {
+        let config = TransportConfig::default();
+        assert_eq!(config.validate(), Ok(config));
+        assert!(config.worker_count <= 16);
+        assert!(config.queue_capacity <= 128);
+    }
+
+    #[test]
+    fn transport_limits_reject_unbounded_shapes() {
+        let config = TransportConfig {
+            worker_count: 0,
+            ..TransportConfig::default()
+        };
+        assert_eq!(config.validate(), Err("worker count must be positive"));
+        let config = TransportConfig {
+            queue_capacity: 0,
+            ..TransportConfig::default()
+        };
+        assert_eq!(config.validate(), Err("queue capacity must be positive"));
+        let config = TransportConfig {
+            read_timeout: Duration::ZERO,
+            ..TransportConfig::default()
+        };
+        assert_eq!(
+            config.validate(),
+            Err("transport timeouts must be positive")
+        );
+    }
 
     struct FakePeer {
         available: bool,

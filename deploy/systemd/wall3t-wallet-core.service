@@ -1,0 +1,43 @@
+[Unit]
+Description=BootStrap Wall3t wallet-core Unix IPC endpoint
+Documentation=file:///usr/share/doc/wall3t/IPC_DEPLOYMENT_POLICY.md
+Wants=network-online.target
+After=local-fs.target
+Before=wall3t-orchestrator.service
+PartOf=wall3t-orchestrator.service
+
+[Service]
+Type=simple
+User=wall3t-core
+Group=wall3t-ipc
+UMask=0077
+WorkingDirectory=/var/lib/wall3t/wallet-core
+ExecStart=/usr/lib/wall3t/wallet_core_socket \
+  /run/wall3t/wallet-core/wallet-core.sock \
+  rust-wallet-core \
+  ${WALL3T_CORE_KEY_ID} \
+  ${WALL3T_CORE_PUBLIC_KEY_HEX} \
+  /var/lib/wall3t/wallet-core/replay.bwnr \
+  ${WALL3T_CORE_NOW_UNIX} \
+  production:${WALL3T_ORCHESTRATOR_UID}:${WALL3T_IPC_GID}
+Restart=on-failure
+RestartSec=1s
+TimeoutStopSec=5s
+
+# These values must come from a root-owned, mode 0640 deployment environment
+# file readable only by root and wall3t-core. Do not use a user-writable file.
+EnvironmentFile=/etc/wall3t/wallet-core.env
+
+# Refuse privilege escalation and reduce filesystem visibility.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+ReadWritePaths=/run/wall3t/wallet-core /var/lib/wall3t/wallet-core
+
+[Install]
+WantedBy=multi-user.target
