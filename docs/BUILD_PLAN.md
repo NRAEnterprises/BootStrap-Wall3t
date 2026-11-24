@@ -582,3 +582,15 @@ The Elixir Rust-service supervisor now removes only a socket node whose `lstat` 
 `docs/IPC_DEPLOYMENT_POLICY.md` defines the approved production split-account model: `wall3t-core` owns the Rust endpoint, `wall3t-orchestrator` is the only Elixir peer, `wall3t-ipc` is the dedicated access group, `/run/wall3t/wallet-core` is a root-provisioned `2750` setgid runtime directory, and the socket is `wall3t-core:wall3t-ipc` with mode `0660`. The existing `0600` same-identity endpoint remains the development reference profile; production must use an explicit reviewed profile rather than silently broadening defaults.
 
 The policy requires Unix peer-credential attestation in addition to BWAU signature verification and replay consumption, type-safe socket cleanup, separate persistent replay state, service-manager readiness/dependency ordering, and fail-closed behavior for incomplete production configuration. It records forbidden permissions and deployment patterns plus acceptance tests for unauthorized peers, path substitution, restart/replay recovery, timeout, disconnect, and secret-free logs. The next implementation gate is a typed IPC profile with Rust peer-credential enforcement and split-account integration tests.
+
+## 28. Next Phase 2 build target — typed IPC profiles and peer-credential enforcement — 2026-11-24
+
+The next implementation target is the production IPC boundary, in dependency order after authenticated transport, replay persistence, socket hardening, supervised lifecycle, and the deployment policy:
+
+- Define a typed Rust IPC profile for the development same-identity mode and the production split-account mode; reject unknown, incomplete, or contradictory profile values at startup.
+- Enforce Unix peer credentials in the Rust socket endpoint so filesystem permissions are not the sole authorization layer. The accepted peer UID/GID or equivalent credential must be bound to the selected profile and deployment policy.
+- Keep BWAU signature verification and durable nonce consumption mandatory; peer authorization is an additional transport gate, never a replacement for message authentication or replay protection.
+- Add split-account integration coverage for authorized peer access, unauthorized UID/GID, wrong group, path substitution, symlink/regular-file replacement, restart/replay recovery, timeout, disconnect, and secret-free error logging.
+- Preserve the fail-closed rule: no valid profile, peer identity, replay state, socket ownership, or authenticated envelope means no request reaches wallet-core policy or signing authority.
+
+This target is a transport/deployment hardening change, not a signing implementation. Its exit evidence must include Rust unit tests, process-level split-account tests, deployment fixture validation, and updated IPC documentation before production service identity can be claimed.
