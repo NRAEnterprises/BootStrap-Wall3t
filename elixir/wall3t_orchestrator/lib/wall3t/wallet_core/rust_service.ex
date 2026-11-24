@@ -53,7 +53,14 @@ defmodule Wall3t.WalletCore.RustService do
     with :ok <- validate_command(command),
          :ok <- validate_args(args),
          {:ok, port} <- open_port(command, args) do
-      {:ok, %{command: command, args: args, port: port, status: :running}}
+      {:ok,
+       %{
+         command: command,
+         args: args,
+         port: port,
+         socket_path: List.first(args),
+         status: :running
+       }}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -64,17 +71,19 @@ defmodule Wall3t.WalletCore.RustService do
 
   @impl true
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
+    remove_socket(state.socket_path)
     {:stop, {:rust_service_exit, status}, %{state | status: {:stopping, status}}}
   end
 
   def handle_info({:EXIT, port, reason}, %{port: port} = state) do
+    remove_socket(state.socket_path)
     {:stop, {:rust_service_exit, reason}, %{state | status: {:stopping, reason}}}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
-  def terminate(_reason, %{port: port}) do
+  def terminate(_reason, %{port: port, socket_path: socket_path}) do
     if is_port(port) do
       try do
         Port.close(port)
@@ -83,6 +92,7 @@ defmodule Wall3t.WalletCore.RustService do
       end
     end
 
+    remove_socket(socket_path)
     :ok
   end
 
@@ -90,7 +100,7 @@ defmodule Wall3t.WalletCore.RustService do
   defp validate_command(_), do: {:error, :invalid_rust_service_command}
 
   defp validate_args(args) when is_list(args) do
-    if Enum.all?(args, &(is_binary(&1) and byte_size(&1) <= 4096)) do
+    if args != [] and Enum.all?(args, &(is_binary(&1) and byte_size(&1) <= 4096)) do
       :ok
     else
       {:error, :invalid_rust_service_arguments}
@@ -111,4 +121,13 @@ defmodule Wall3t.WalletCore.RustService do
   # boundaries explicit. Deployment manifests must provide, for example,
   # "/run/wall3t.sock\u001faccept\u001fkey-id".
   defp parse_args(value), do: String.split(value, <<31>>, trim: true)
+
+  defp remove_socket(path) when is_binary(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :socket}} -> File.rm(path)
+      _ -> :ok
+    end
+  end
+
+  defp remove_socket(_), do: :ok
 end
