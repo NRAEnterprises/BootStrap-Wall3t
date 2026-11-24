@@ -10,7 +10,7 @@ use std::io::{Read, Write};
 use std::os::raw::c_uint;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::process;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -166,7 +166,9 @@ fn prepare_socket_path(socket_path: &str) -> Result<(), String> {
         return Err("refusing to replace an existing socket path".to_owned());
     }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let metadata = fs::metadata(parent).map_err(|_| "socket parent is unavailable".to_owned())?;
+    validate_path_components(parent)?;
+    let metadata =
+        fs::symlink_metadata(parent).map_err(|_| "socket parent is unavailable".to_owned())?;
     if !metadata.is_dir() {
         return Err("socket parent is not a directory".to_owned());
     }
@@ -174,6 +176,38 @@ fn prepare_socket_path(socket_path: &str) -> Result<(), String> {
     // A sticky directory such as /tmp is acceptable; otherwise reject group/other writes.
     if mode & 0o0022 != 0 && mode & 0o1000 == 0 {
         return Err("socket parent is writable by group or other".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_path_components(path: &Path) -> Result<(), String> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir()
+            .map_err(|_| "socket parent cannot be resolved".to_owned())?
+            .join(path)
+    };
+    let components: Vec<Component<'_>> = absolute.components().collect();
+    let mut current = PathBuf::new();
+    for (index, component) in components.iter().enumerate() {
+        match component {
+            Component::RootDir => current.push(Path::new("/")),
+            Component::Normal(name) => current.push(name),
+            Component::CurDir => continue,
+            Component::ParentDir => {
+                return Err("socket parent contains a parent traversal".to_owned())
+            }
+            Component::Prefix(_) => continue,
+        }
+        let metadata = fs::symlink_metadata(&current)
+            .map_err(|_| "socket parent component is unavailable".to_owned())?;
+        if metadata.file_type().is_symlink() {
+            return Err("socket parent contains a symlink component".to_owned());
+        }
+        if index + 1 < components.len() && !metadata.is_dir() {
+            return Err("socket parent component is not a directory".to_owned());
+        }
     }
     Ok(())
 }

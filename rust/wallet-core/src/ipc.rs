@@ -129,6 +129,7 @@ pub enum PeerCredentialError {
     Unavailable,
     SystemCallFailed,
     UnexpectedLength,
+    GroupAttestationFailed,
     UnauthorizedUid,
     UnauthorizedGid,
 }
@@ -139,6 +140,7 @@ impl fmt::Display for PeerCredentialError {
             Self::Unavailable => write!(f, "peer credentials unavailable"),
             Self::SystemCallFailed => write!(f, "peer credential query failed"),
             Self::UnexpectedLength => write!(f, "peer credential response length invalid"),
+            Self::GroupAttestationFailed => write!(f, "peer group attestation failed"),
             Self::UnauthorizedUid => write!(f, "peer uid is not authorized by the IPC profile"),
             Self::UnauthorizedGid => write!(f, "peer gid is not authorized by the IPC profile"),
         }
@@ -159,7 +161,10 @@ pub fn authorize_peer<P: PeerCredentialSource>(
     if credentials.uid != expected_uid {
         return Err(PeerCredentialError::UnauthorizedUid);
     }
-    if credentials.gid != expected_gid {
+    if credentials.gid != expected_gid
+        && (!profile.is_production()
+            || !source.has_supplementary_group(&credentials, expected_gid)?)
+    {
         return Err(PeerCredentialError::UnauthorizedGid);
     }
     Ok(credentials)
@@ -168,6 +173,14 @@ pub fn authorize_peer<P: PeerCredentialSource>(
 pub trait PeerCredentialSource {
     fn is_available(&self) -> bool;
     fn credentials(&self) -> Result<PeerCredentials, PeerCredentialError>;
+
+    fn has_supplementary_group(
+        &self,
+        _credentials: &PeerCredentials,
+        _expected_gid: u32,
+    ) -> Result<bool, PeerCredentialError> {
+        Ok(false)
+    }
 }
 
 #[cfg(unix)]
@@ -178,6 +191,14 @@ impl PeerCredentialSource for std::os::unix::net::UnixStream {
 
     fn credentials(&self) -> Result<PeerCredentials, PeerCredentialError> {
         peer_credentials(self)
+    }
+
+    fn has_supplementary_group(
+        &self,
+        credentials: &PeerCredentials,
+        expected_gid: u32,
+    ) -> Result<bool, PeerCredentialError> {
+        supplementary_group_contains(credentials.pid, expected_gid)
     }
 }
 
@@ -233,6 +254,30 @@ fn peer_credentials(
         uid: credentials.uid,
         gid: credentials.gid,
     })
+}
+
+#[cfg(target_os = "linux")]
+fn supplementary_group_contains(pid: i32, expected_gid: u32) -> Result<bool, PeerCredentialError> {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .map_err(|_| PeerCredentialError::GroupAttestationFailed)?;
+    let groups = status
+        .lines()
+        .find_map(|line| line.strip_prefix("Groups:\t"))
+        .ok_or(PeerCredentialError::GroupAttestationFailed)?;
+    groups
+        .split_whitespace()
+        .map(|value| value.parse::<u32>())
+        .collect::<Result<Vec<_>, _>>()
+        .map(|groups| groups.contains(&expected_gid))
+        .map_err(|_| PeerCredentialError::GroupAttestationFailed)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn supplementary_group_contains(
+    _pid: i32,
+    _expected_gid: u32,
+) -> Result<bool, PeerCredentialError> {
+    Err(PeerCredentialError::Unavailable)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -304,6 +349,7 @@ mod tests {
     struct FakePeer {
         available: bool,
         credentials: Result<PeerCredentials, PeerCredentialError>,
+        supplementary_group: bool,
     }
 
     impl PeerCredentialSource for FakePeer {
@@ -313,6 +359,14 @@ mod tests {
 
         fn credentials(&self) -> Result<PeerCredentials, PeerCredentialError> {
             self.credentials
+        }
+
+        fn has_supplementary_group(
+            &self,
+            _credentials: &PeerCredentials,
+            _expected_gid: u32,
+        ) -> Result<bool, PeerCredentialError> {
+            Ok(self.supplementary_group)
         }
     }
 
@@ -351,6 +405,7 @@ mod tests {
         let profile = IpcProfile::production(1001, 2001);
         let authorized = FakePeer {
             available: true,
+            supplementary_group: false,
             credentials: Ok(PeerCredentials {
                 pid: 7,
                 uid: 1001,
@@ -366,6 +421,7 @@ mod tests {
 
         let wrong_uid = FakePeer {
             available: true,
+            supplementary_group: false,
             credentials: Ok(PeerCredentials {
                 pid: 7,
                 uid: 1002,
@@ -379,6 +435,7 @@ mod tests {
 
         let wrong_gid = FakePeer {
             available: true,
+            supplementary_group: false,
             credentials: Ok(PeerCredentials {
                 pid: 7,
                 uid: 1001,
@@ -389,12 +446,29 @@ mod tests {
             authorize_peer(&wrong_gid, profile),
             Err(PeerCredentialError::UnauthorizedGid)
         );
+
+        let supplementary = FakePeer {
+            available: true,
+            supplementary_group: true,
+            credentials: Ok(PeerCredentials {
+                pid: 7,
+                uid: 1001,
+                gid: 3000,
+            }),
+        };
+        assert_eq!(
+            authorize_peer(&supplementary, profile)
+                .expect("supplementary group")
+                .pid,
+            7
+        );
     }
 
     #[test]
     fn production_never_allows_unavailable_peer_attestation() {
         let peer = FakePeer {
             available: false,
+            supplementary_group: false,
             credentials: Err(PeerCredentialError::Unavailable),
         };
         assert_eq!(

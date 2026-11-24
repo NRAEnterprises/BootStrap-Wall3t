@@ -23,6 +23,8 @@ ExecStart=/usr/lib/wall3t/wallet_core_socket \
 Restart=on-failure
 RestartSec=1s
 TimeoutStopSec=5s
+TimeoutStartSec=15s
+ExecStartPost=/usr/lib/wall3t/wallet-core-readiness /run/wall3t/wallet-core/wallet-core.sock wall3t-core wall3t-ipc 660
 
 # These values must come from a root-owned, mode 0640 deployment environment
 # file readable only by root and wall3t-core. Do not use a user-writable file.
