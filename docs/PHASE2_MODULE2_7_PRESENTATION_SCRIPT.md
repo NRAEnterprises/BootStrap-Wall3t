@@ -95,6 +95,7 @@ The effective-group deployment remains preferred because it is easier to verify 
 
 - Root-provisioned runtime directory
 - `/run/wall3t/wallet-core` mode `2750`
+- systemd-created socket via inherited FD 3
 - Socket mode `0660`
 - No symlinked path components
 - No broad cleanup deletion
@@ -104,7 +105,7 @@ The effective-group deployment remains preferred because it is easier to verify 
 
 The socket is no longer validated only through a metadata call that could follow a symlinked parent. Each parent component is checked with no-symlink metadata traversal before bind. Parent traversal, missing components, non-directory ancestors, and symlink components are rejected.
 
-The host provisions the runtime directory with tmpfiles.d. Rust does not create or broaden the production runtime path. Replay state lives separately and is not placed next to the socket.
+The host provisions the runtime directory with tmpfiles.d. Because the directory is intentionally not writable by `wall3t-core`, the systemd socket unit creates the socket and passes FD 3 to Rust. Rust does not create, chmod, unlink, or broaden the production runtime path. Replay state lives separately and is not placed next to the socket.
 
 ## Slide 7 — systemd and tmpfiles Deployment Draft
 
@@ -114,14 +115,14 @@ The host provisions the runtime directory with tmpfiles.d. Rust does not create 
 root:wall3t-ipc 0750 /run/wall3t
 root:wall3t-ipc 2750 /run/wall3t/wallet-core
 wall3t-core:wall3t-core 0700 /var/lib/wall3t/wallet-core
-wall3t-core:wall3t-ipc 0660 wallet-core.sock
+systemd -> wall3t-core:wall3t-ipc 0660 wallet-core.sock -> FD 3
 ```
 
 **Speaker script:**
 
-The deployment artifacts define a root-owned runtime layout, separate replay state, service ordering, restricted address families, no-new-privileges, and systemd dependency coupling.
+The deployment artifacts define a root-owned runtime layout, separate replay state, systemd socket activation, service ordering, restricted address families, no-new-privileges, and systemd dependency coupling.
 
-These are drafts rather than a production claim. Installation still requires real account IDs, approved binary paths, root-owned configuration, generated current-time handling, and a deliberate decision that systemd—not Elixir’s in-process supervisor—owns the Rust lifecycle.
+These are drafts rather than a production claim. Installation still requires real account IDs, approved binary paths, root-owned configuration, generated current-time handling, systemd validation on the target host, and a deliberate decision that systemd—not Elixir’s in-process supervisor—owns the Rust lifecycle.
 
 ## Slide 8 — Fault and Recovery Evidence
 
@@ -151,7 +152,7 @@ The harness also scans captured service output and rejects authenticated envelop
 - Socket type, owner, group, mode
 - Runtime directory mode
 
-**Designed for next iteration:**
+**Implemented:**
 
 - Connection-bound `HREQ → HCHL → HACK → HOK`
 - No BWAU decoding
@@ -161,7 +162,7 @@ The harness also scans captured service output and rejects authenticated envelop
 
 The current readiness probe is intentionally metadata-only. It checks socket type, ownership, group, mode, non-symlink status, and runtime-directory permissions.
 
-A future health protocol is designed separately. It uses a connection-bound challenge exchange authenticated by the existing peer-credential boundary. It does not submit a normal BWAU envelope, does not consume a replay nonce, and does not expose wallet metadata. That protocol must be implemented and tested before the deployment can claim a non-consuming authenticated health exchange.
+The health protocol is implemented separately from BWAU. It uses a connection-bound challenge exchange authenticated by the existing peer-credential boundary. It does not submit a normal BWAU envelope, does not consume a replay nonce, and does not expose wallet metadata. Local E2E now proves the exchange and replay-journal stability; production still requires target-host sequencing and split-account validation.
 
 ## Slide 10 — Results and Remaining Gates
 
@@ -178,13 +179,13 @@ A future health protocol is designed separately. It uses a connection-bound chal
 
 - Real split-account host installation
 - Service-manager identity verification
-- Health protocol implementation
+- Target-host health sequencing and split-account validation
 - External security review
 
 **Speaker script:**
 
 Module 2.7 has local implementation and validation evidence. Fifty-four Rust unit tests, nine integration tests, formatting, Clippy, authenticated socket E2E, restart/replay recovery, timeout, disconnect, saturation, Rust-exit, path-substitution, readiness, and log-review cases all pass.
 
-The remaining work is operational and security-critical: install the artifacts on a real split-account host, verify service-manager identity semantics, implement the non-consuming health exchange, complete platform-specific acceptance, and obtain external security review.
+The remaining work is operational and security-critical: install the artifacts on a real split-account host, verify service-manager identity semantics, validate inherited FD 3 and health sequencing, complete platform-specific acceptance, and obtain external security review.
 
 The central architectural result is unchanged: this remains an automation-first wallet. Policies and orchestration stay autonomous, while Rust retains the authoritative trust boundary and all fail-closed execution controls.

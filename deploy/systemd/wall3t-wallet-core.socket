@@ -1,0 +1,16 @@
+[Unit]
+Description=BootStrap Wall3t wallet-core Unix IPC socket
+Documentation=file:///usr/share/doc/wall3t/IPC_DEPLOYMENT_POLICY.md
+PartOf=wall3t-orchestrator.service
+
+[Socket]
+ListenStream=/run/wall3t/wallet-core/wallet-core.sock
+SocketUser=wall3t-core
+SocketGroup=wall3t-ipc
+SocketMode=0660
+Accept=no
+RemoveOnStop=yes
+Service=wall3t-wallet-core.service
+
+[Install]
+WantedBy=sockets.target

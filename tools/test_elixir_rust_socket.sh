@@ -45,6 +45,18 @@ for _ in $(seq 1 50); do [[ -S "$socket_path" ]] && break; sleep 0.02; done
 cd "$repo_root/elixir/wall3t_orchestrator"
 export WALL3T_SOCKET_PATH="$socket_path"
 export WALL3T_ENVELOPE_HEX="$envelope_hex"
+WALL3T_SOCKET_PATH="$socket_path" mix run -e '
+  socket = System.fetch_env!("WALL3T_SOCKET_PATH")
+  {:ok, %{state_flags: 0x1F, protocol_epoch: 1}} = Wall3t.WalletCore.UnixSocketClient.health(socket)
+'
+replay_before_health="$(sha256sum "$replay_path" | cut -d' ' -f1)"
+mix run -e '
+  socket = System.fetch_env!("WALL3T_SOCKET_PATH")
+  {:ok, %{state_flags: 0x1F, protocol_epoch: 1}} = Wall3t.WalletCore.UnixSocketClient.health(socket)
+'
+replay_after_health="$(sha256sum "$replay_path" | cut -d' ' -f1)"
+[[ "$replay_before_health" == "$replay_after_health" ]] || { echo "health changed replay journal" >&2; exit 1; }
+printf '%s\n' 'Health exchange leaves replay journal unchanged: PASS'
 mix run -e '
   envelope = Base.decode16!(System.fetch_env!("WALL3T_ENVELOPE_HEX"), case: :lower)
   socket = System.fetch_env!("WALL3T_SOCKET_PATH")

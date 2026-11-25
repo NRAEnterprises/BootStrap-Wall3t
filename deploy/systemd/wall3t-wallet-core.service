@@ -3,6 +3,8 @@ Description=BootStrap Wall3t wallet-core Unix IPC endpoint
 Documentation=file:///usr/share/doc/wall3t/IPC_DEPLOYMENT_POLICY.md
 Wants=network-online.target
 After=local-fs.target
+Requires=wall3t-wallet-core.socket
+After=wall3t-wallet-core.socket
 Before=wall3t-orchestrator.service
 PartOf=wall3t-orchestrator.service
 
@@ -12,6 +14,9 @@ User=wall3t-core
 Group=wall3t-ipc
 UMask=0077
 WorkingDirectory=/var/lib/wall3t/wallet-core
+# Production receives the already-created systemd socket as LISTEN_FDS=1,
+# LISTEN_PID=$MAINPID, fd 3. The pathname argument remains for diagnostics and
+# development compatibility; Rust never binds or unlinks it in activation mode.
 ExecStart=/usr/lib/wall3t/wallet_core_socket \
   /run/wall3t/wallet-core/wallet-core.sock \
   rust-wallet-core \
@@ -39,7 +44,7 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictAddressFamilies=AF_UNIX
-ReadWritePaths=/run/wall3t/wallet-core /var/lib/wall3t/wallet-core
+ReadWritePaths=/var/lib/wall3t/wallet-core
 
 [Install]
 WantedBy=multi-user.target

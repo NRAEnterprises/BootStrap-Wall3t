@@ -3,14 +3,19 @@ defmodule Wall3t.WalletCore.UnixSocketClient do
   Authenticated Unix-domain client for the Rust wallet-core socket endpoint.
 
   The client transports already-authenticated BWAU bytes only. It cannot sign,
-  broadcast, unlock keys, or construct private-key material.
+  broadcast, unlock keys, or construct private-key material. Health checks use
+  a separate connection-bound control protocol and never submit BWAU bytes.
   """
 
   @max_frame 8 * 1024 * 1024
   @max_response 16 * 1024
+  @health_version 1
+  @health_lease_ms 2_000
+  @health_response_flags 0x1F
 
   @spec submit(Path.t(), binary(), timeout()) :: {:ok, map()} | {:error, atom() | binary()}
   def submit(socket_path, envelope, timeout \\ 5_000)
+
   def submit(socket_path, envelope, timeout)
       when is_binary(socket_path) and is_binary(envelope) and is_integer(timeout) and timeout > 0 do
     if byte_size(envelope) == 0 or byte_size(envelope) > @max_frame do
@@ -30,8 +35,46 @@ defmodule Wall3t.WalletCore.UnixSocketClient do
 
   def submit(_, _, _), do: {:error, :invalid_arguments}
 
+  @doc """
+  Performs the non-consuming authenticated HREQ/HCHL/HACK/HOK exchange.
+
+  The request is connection-bound, uses only peer credentials plus a fresh
+  challenge, and does not submit a BWAU replay nonce.
+  """
+  @spec health(Path.t(), timeout()) :: {:ok, map()} | {:error, atom() | binary()}
+  def health(socket_path, timeout \\ 5_000)
+
+  def health(socket_path, timeout)
+      when is_binary(socket_path) and is_integer(timeout) and timeout > 0 do
+    request_id = :crypto.strong_rand_bytes(16)
+
+    request =
+      <<"HREQ", @health_version::unsigned-big-integer-size(16), request_id::binary,
+        @health_lease_ms::unsigned-big-integer-size(64)>>
+
+    with {:ok, socket} <- connect(socket_path, timeout),
+         :ok <- send_frame(socket, request),
+         {:ok, challenge} <- recv_frame(socket, timeout),
+         {:ok, acknowledgement} <- build_acknowledgement(challenge, request_id),
+         :ok <- send_frame(socket, acknowledgement),
+         {:ok, response} <- recv_frame(socket, timeout),
+         result <- parse_health_response(response, request_id),
+         :ok <- :gen_tcp.close(socket) do
+      result
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def health(_, _), do: {:error, :invalid_arguments}
+
   defp connect(path, timeout) do
-    case :gen_tcp.connect({:local, String.to_charlist(path)}, 0, [:binary, active: false], timeout) do
+    case :gen_tcp.connect(
+           {:local, String.to_charlist(path)},
+           0,
+           [:binary, active: false],
+           timeout
+         ) do
       {:ok, socket} -> {:ok, socket}
       {:error, :econnrefused} -> {:error, :service_unavailable}
       {:error, :enoent} -> {:error, :service_unavailable}
@@ -57,8 +100,49 @@ defmodule Wall3t.WalletCore.UnixSocketClient do
     end
   end
 
+  defp build_acknowledgement(
+         <<"HCHL", @health_version::unsigned-big-integer-size(16), challenge::binary-size(32),
+           _server_instance::binary-size(16), _expires_after_ms::unsigned-big-integer-size(32)>>,
+         request_id
+       ) do
+    {:ok,
+     <<"HACK", @health_version::unsigned-big-integer-size(16), request_id::binary,
+       challenge::binary>>}
+  end
+
+  defp build_acknowledgement(_, _), do: {:error, :invalid_health_challenge}
+
+  defp parse_health_response(
+         <<"HOK!", @health_version::unsigned-big-integer-size(16), request_id::binary-size(16),
+           server_instance::binary-size(16), flags::unsigned-big-integer-size(32),
+           epoch::unsigned-big-integer-size(64)>>,
+         expected_request_id
+       ) do
+    cond do
+      request_id != expected_request_id ->
+        {:error, :health_request_mismatch}
+
+      flags != @health_response_flags ->
+        {:error, :health_flags_not_ready}
+
+      true ->
+        {:ok, %{server_instance: server_instance, state_flags: flags, protocol_epoch: epoch}}
+    end
+  end
+
+  defp parse_health_response(
+         <<"HERR", @health_version::unsigned-big-integer-size(16), _request_id::binary-size(16),
+           code::unsigned-big-integer-size(16)>>,
+         _expected_request_id
+       ),
+       do: {:error, {:health_error, code}}
+
+  defp parse_health_response(_, _), do: {:error, :invalid_health_response}
+
   defp parse_response(<<"OK ", metadata::binary>>) do
-    case Regex.run(~r/^kind=(\d+) payload_bytes=(\d+) registry_version=(\d+)\n$/, metadata, capture: :all_but_first) do
+    case Regex.run(~r/^kind=(\d+) payload_bytes=(\d+) registry_version=(\d+)\n$/, metadata,
+           capture: :all_but_first
+         ) do
       [kind, payload_bytes, registry_version] ->
         {:ok,
          %{
@@ -67,7 +151,8 @@ defmodule Wall3t.WalletCore.UnixSocketClient do
            registry_version: String.to_integer(registry_version)
          }}
 
-      _ -> {:error, :invalid_success_response}
+      _ ->
+        {:error, :invalid_success_response}
     end
   end
 

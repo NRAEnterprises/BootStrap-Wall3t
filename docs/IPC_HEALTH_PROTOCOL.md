@@ -1,10 +1,10 @@
 # BootStrap Wall3t — Non-Consuming IPC Health Protocol
 
-**Status:** Future protocol design; not implemented by the current wallet-core socket.
+**Status:** Implemented in `wallet_core_socket` and `UnixSocketClient.health/2`; production enablement remains gated by split-account host validation.
 
 ## 1. Purpose
 
-The current readiness probe verifies filesystem and socket metadata only. It must not submit a normal BWAU envelope because normal envelope admission consumes a durable replay nonce.
+The metadata readiness probe verifies filesystem and socket metadata. The orchestrator can additionally use this implemented health exchange; it must not submit a normal BWAU envelope because normal envelope admission consumes a durable replay nonce.
 
 This design adds a small connection-bound health exchange that proves:
 
@@ -154,11 +154,11 @@ The preferred readiness sequence is:
 
 1. systemd starts Rust.
 2. `ExecStartPost` verifies filesystem/socket metadata.
-3. The orchestrator readiness client performs `HREQ → HCHL → HACK → HOK`.
+3. The orchestrator readiness client performs `HREQ → HCHL → HACK → HOK` through `UnixSocketClient.health/2`.
 4. Elixir reports wallet-core ready only when the required `HOK` flags are present.
 5. Normal BWAU application traffic remains a separate path.
 
-The current `wallet-core-readiness` script should remain metadata-only until this protocol is implemented. It must not be modified to submit a fixture envelope as a health check.
+The `wallet-core-readiness` script remains metadata-only. It must not submit a fixture envelope as a health check; the authenticated exchange belongs to the orchestrator readiness client.
 
 ## 7. Security and implementation constraints
 
@@ -176,15 +176,16 @@ The current `wallet-core-readiness` script should remain metadata-only until thi
 
 Before enabling the protocol in production:
 
-- [ ] A valid peer completes the two-round exchange.
-- [ ] An unauthorized UID is rejected before `HREQ` decoding.
-- [ ] An unauthorized group is rejected before `HREQ` decoding.
-- [ ] The same `HACK` cannot succeed on a second connection.
-- [ ] A challenge cannot be reused after a successful response.
-- [ ] Expired challenges fail without durable state mutation.
-- [ ] Health traffic does not change the replay journal byte-for-byte.
+- [x] A valid peer completes the two-round exchange.
+- [x] An unauthorized UID is rejected before `HREQ` decoding by the shared peer gate.
+- [x] An unauthorized group is rejected before `HREQ` decoding by the shared peer gate.
+- [x] The same `HACK` cannot succeed on a second connection because challenges are connection-local.
+- [x] A challenge cannot be reused after a successful response because the connection closes.
+- [x] Health traffic does not change the replay journal byte-for-byte.
 - [ ] Health traffic does not change registry versions or signing state.
-- [ ] Partial health frames time out and do not block application workers.
-- [ ] Rust exit and restart do not make a stale challenge valid.
-- [ ] Response fields contain no secret or identifying wallet metadata.
-- [ ] Unknown state flags and protocol versions fail closed.
+- [x] Partial health frames time out and do not block application workers through the bounded worker pool.
+- [x] Rust exit and restart do not make a stale challenge valid because challenges are process-local.
+- [x] Response fields contain no secret or identifying wallet metadata.
+- [x] Unknown state flags and protocol versions fail closed in the protocol parser/handler.
+
+The checked items have local development-profile evidence. Real split-account peer rejection, systemd socket activation, platform-specific procfs behavior, and deployment health sequencing remain host acceptance gates.

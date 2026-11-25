@@ -81,12 +81,13 @@ Install the release binary and readiness probe as root, preserving ownership and
 ```sh
 install -o root -g root -m 0755 wallet_core_socket /usr/lib/wall3t/wallet_core_socket
 install -o root -g root -m 0755 deploy/systemd/wall3t-wallet-core-readiness /usr/lib/wall3t/wallet-core-readiness
+install -o root -g root -m 0644 deploy/systemd/wall3t-wallet-core.socket /etc/systemd/system/wall3t-wallet-core.socket
 install -o root -g root -m 0644 deploy/systemd/wall3t-wallet-core.service /etc/systemd/system/wall3t-wallet-core.service
 install -o root -g root -m 0644 deploy/systemd/wall3t-orchestrator.service /etc/systemd/system/wall3t-orchestrator.service
 install -o root -g root -m 0644 deploy/tmpfiles.d/wall3t.conf /etc/tmpfiles.d/wall3t.conf
 ```
 
-The unit paths must be changed to the approved release installation path before installation. Do not install a unit containing placeholder paths.
+The unit paths must be changed to the approved release installation path before installation. Do not install a unit containing placeholder paths. The socket unit is the production bind owner: systemd creates `/run/wall3t/wallet-core/wallet-core.sock`, sets `wall3t-core:wall3t-ipc` `0660`, and passes the listening descriptor as FD 3. Rust must not pathname-bind or unlink the systemd-managed socket.
 
 ## 5. Root-owned configuration
 
@@ -144,19 +145,20 @@ Reload systemd and inspect the rendered units before activation:
 
 ```sh
 systemctl daemon-reload
-systemctl cat wall3t-wallet-core.service wall3t-orchestrator.service
-systemd-analyze verify wall3t-wallet-core.service wall3t-orchestrator.service
+systemctl cat wall3t-wallet-core.socket wall3t-wallet-core.service wall3t-orchestrator.service
+systemd-analyze verify wall3t-wallet-core.socket wall3t-wallet-core.service wall3t-orchestrator.service
 ```
 
 Enable and start in dependency order:
 
 ```sh
-systemctl enable wall3t-wallet-core.service wall3t-orchestrator.service
+systemctl enable wall3t-wallet-core.socket wall3t-wallet-core.service wall3t-orchestrator.service
+systemctl start wall3t-wallet-core.socket
 systemctl start wall3t-wallet-core.service
 systemctl start wall3t-orchestrator.service
 ```
 
-The orchestrator must not report ready until the Rust socket passes the metadata readiness probe and the future non-consuming authenticated health exchange is available.
+The orchestrator must not report ready until the Rust socket passes the metadata readiness probe and `HREQ → HCHL → HACK → HOK` succeeds with the required `0x1f` state flags. The health exchange is implemented by `UnixSocketClient.health/2` and never consumes a BWAU replay nonce.
 
 ## 8. Verification checklist
 
@@ -172,7 +174,7 @@ The orchestrator must not report ready until the Rust socket passes the metadata
 
 ### Socket and profile
 
-- [ ] Socket exists only after Rust readiness.
+- [ ] Socket is created by `wall3t-wallet-core.socket` before Rust and is consumed through inherited FD 3.
 - [ ] Socket is `wall3t-core:wall3t-ipc` mode `0660`.
 - [ ] Active profile is explicit production mode with reviewed numeric IDs.
 - [ ] Development mode is not present in the production unit.
@@ -199,7 +201,7 @@ The orchestrator must not report ready until the Rust socket passes the metadata
 - [ ] Rust exit during a request produces a bounded client failure.
 - [ ] Service logs contain no BWAU payloads, signatures, private keys, credentials, or mnemonics.
 - [ ] Readiness output contains metadata only.
-- [ ] The non-consuming authenticated health exchange is either deployed or the service remains explicitly pre-production.
+- [ ] The non-consuming authenticated health exchange completes before orchestrator readiness and leaves the replay journal byte-for-byte unchanged.
 
 ## 9. Rollback
 
