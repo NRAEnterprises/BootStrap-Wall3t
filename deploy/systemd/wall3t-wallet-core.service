@@ -23,7 +23,7 @@ ExecStart=/usr/lib/wall3t/wallet_core_socket \
   ${WALL3T_CORE_KEY_ID} \
   ${WALL3T_CORE_PUBLIC_KEY_HEX} \
   /var/lib/wall3t/wallet-core/replay.bwnr \
-  ${WALL3T_CORE_NOW_UNIX} \
+  current \
   production:${WALL3T_ORCHESTRATOR_UID}:${WALL3T_IPC_GID}
 Restart=on-failure
 RestartSec=1s

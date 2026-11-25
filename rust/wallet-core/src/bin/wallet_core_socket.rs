@@ -60,9 +60,7 @@ fn run() -> Result<(), String> {
     let key_id = &args[3];
     let public_key = parse_hex_32(&args[4])?;
     let replay_path = &args[5];
-    let now_unix = args[6]
-        .parse::<u64>()
-        .map_err(|_| "now-unix must be a non-negative integer".to_owned())?;
+    let now_unix = parse_now_unix(&args[6])?;
     let (current_uid, current_gid) = unsafe { (geteuid(), getegid()) };
     let profile = IpcProfile::parse(&args[7], current_uid, current_gid)
         .map_err(|error| format!("IPC profile rejected: {error}"))?;
@@ -82,7 +80,7 @@ fn run() -> Result<(), String> {
     let replay = PersistentNonceRegistry::open(replay_path)
         .map_err(|error| format!("replay registry failed: {error}"))?;
 
-    let activated = systemd_activation_requested();
+    let activated = systemd_activation_requested()?;
     let listener = if activated {
         activated_listener(socket_path, profile)?
     } else {
@@ -142,12 +140,24 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn systemd_activation_requested() -> bool {
-    env::var("LISTEN_PID")
-        .ok()
-        .and_then(|value| value.parse::<u32>().ok())
-        == Some(process::id())
-        && env::var("LISTEN_FDS").ok().as_deref() == Some("1")
+fn systemd_activation_requested() -> Result<bool, String> {
+    activation_state(
+        env::var("LISTEN_PID").ok().as_deref(),
+        env::var("LISTEN_FDS").ok().as_deref(),
+        process::id(),
+    )
+}
+
+fn activation_state(
+    listen_pid: Option<&str>,
+    listen_fds: Option<&str>,
+    process_id: u32,
+) -> Result<bool, String> {
+    match (listen_pid, listen_fds) {
+        (None, None) => Ok(false),
+        (Some(pid), Some("1")) if pid.parse::<u32>().ok() == Some(process_id) => Ok(true),
+        _ => Err("invalid systemd socket activation environment".to_owned()),
+    }
 }
 
 fn activated_listener(socket_path: &str, profile: IpcProfile) -> Result<UnixListener, String> {
@@ -161,6 +171,9 @@ fn activated_listener(socket_path: &str, profile: IpcProfile) -> Result<UnixList
     listener
         .set_nonblocking(false)
         .map_err(|_| "cannot configure activated socket".to_owned())?;
+    listener
+        .local_addr()
+        .map_err(|_| "activated fd 3 is not a Unix listener".to_owned())?;
     // PID 1 created and owns the pathname. Validate that node without chmod,
     // unlink, or pathname-bind operations in the Rust service.
     harden_socket_path_metadata(socket_path, profile)?;
@@ -491,10 +504,41 @@ fn parse_hex_32(value: &str) -> Result<[u8; 32], String> {
     Ok(output)
 }
 
+fn parse_now_unix(value: &str) -> Result<u64, String> {
+    if value == "current" {
+        return Ok(current_unix());
+    }
+    value
+        .parse::<u64>()
+        .map_err(|_| "now-unix must be a non-negative integer or current".to_owned())
+}
+
 #[allow(dead_code)]
 fn current_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{activation_state, parse_now_unix};
+
+    #[test]
+    fn activation_requires_a_matching_pid_and_exactly_one_fd() {
+        assert_eq!(activation_state(None, None, 42), Ok(false));
+        assert_eq!(activation_state(Some("42"), Some("1"), 42), Ok(true));
+        assert!(activation_state(Some("41"), Some("1"), 42).is_err());
+        assert!(activation_state(Some("42"), Some("2"), 42).is_err());
+        assert!(activation_state(Some("42"), None, 42).is_err());
+        assert!(activation_state(None, Some("1"), 42).is_err());
+    }
+
+    #[test]
+    fn current_time_mode_is_supported_without_accepting_arbitrary_text() {
+        assert!(parse_now_unix("current").is_ok());
+        assert_eq!(parse_now_unix("1700000000"), Ok(1_700_000_000));
+        assert!(parse_now_unix("stale").is_err());
+    }
 }

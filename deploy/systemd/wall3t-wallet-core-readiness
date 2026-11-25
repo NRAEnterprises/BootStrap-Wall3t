@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Metadata readiness only. An authenticated application health exchange must be
-# added by the deployment release once a non-consuming health protocol exists.
+# Metadata readiness only. The orchestrator performs the authenticated,
+# non-consuming health exchange under its own peer identity before readiness.
 socket_path="${1:?socket path required}"
 expected_owner="${2:?socket owner required}"
 expected_group="${3:?socket group required}"

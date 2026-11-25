@@ -20,6 +20,8 @@ TimeoutStopSec=10s
 # Rust is a systemd dependency in this deployment mode; do not let the Elixir
 # application start a second wallet-core child process.
 EnvironmentFile=/etc/wall3t/orchestrator.env
+Environment=WALL3T_RUST_SERVICE_EXTERNAL=1
+Environment=WALL3T_SOCKET_PATH=/run/wall3t/wallet-core/wallet-core.sock
 
 NoNewPrivileges=yes
 PrivateTmp=yes
