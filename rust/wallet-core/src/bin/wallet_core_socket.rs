@@ -7,7 +7,8 @@
 use std::env;
 use std::fs;
 use std::io::{Read, Write};
-use std::os::raw::c_uint;
+use std::os::fd::AsRawFd;
+use std::os::raw::{c_int, c_uint, c_void};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -24,6 +25,55 @@ unsafe extern "C" {
     fn umask(mask: c_uint) -> c_uint;
     fn geteuid() -> c_uint;
     fn getegid() -> c_uint;
+    fn getsockopt(
+        socket: c_int,
+        level: c_int,
+        option_name: c_int,
+        option_value: *mut c_void,
+        option_len: *mut c_uint,
+    ) -> c_int;
+}
+
+const SOL_SOCKET: c_int = 1;
+const SO_PEERCRED: c_int = 17;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Ucred {
+    pid: c_int,
+    uid: c_uint,
+    gid: c_uint,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IpcProfile {
+    Development,
+    Production { peer_uid: c_uint, peer_gid: c_uint },
+}
+
+impl IpcProfile {
+    fn parse(args: &[String]) -> Result<Self, String> {
+        match args {
+            [] => Ok(Self::Development),
+            [profile, peer_uid, peer_gid] if profile == "production" => Ok(Self::Production {
+                peer_uid: peer_uid
+                    .parse()
+                    .map_err(|_| "production peer UID must be numeric".to_owned())?,
+                peer_gid: peer_gid
+                    .parse()
+                    .map_err(|_| "production peer GID must be numeric".to_owned())?,
+            }),
+            [profile] if profile == "development" => Ok(Self::Development),
+            _ => Err("profile must be development or production <peer-uid> <peer-gid>".to_owned()),
+        }
+    }
+
+    fn socket_mode(self) -> u32 {
+        match self {
+            Self::Development => 0o600,
+            Self::Production { .. } => 0o660,
+        }
+    }
 }
 
 fn main() {
@@ -35,9 +85,9 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
-    if args.len() != 7 {
+    if args.len() != 7 && args.len() != 8 && args.len() != 10 {
         return Err(format!(
-            "usage: {} <socket> <signer> <key-id> <public-key-hex> <replay-file> <now-unix>",
+            "usage: {} <socket> <signer> <key-id> <public-key-hex> <replay-file> <now-unix> [development|production <peer-uid> <peer-gid>]",
             args[0]
         ));
     }
@@ -49,6 +99,7 @@ fn run() -> Result<(), String> {
     let now_unix = args[6]
         .parse::<u64>()
         .map_err(|_| "now-unix must be a non-negative integer".to_owned())?;
+    let profile = IpcProfile::parse(&args[7..])?;
 
     prepare_socket_path(socket_path)?;
     let registry = KeyRegistry::new();
@@ -68,12 +119,12 @@ fn run() -> Result<(), String> {
     // Apply the restrictive umask before bind so there is no permissive creation window.
     unsafe { umask(0o077) };
     let listener = UnixListener::bind(socket_path).map_err(|_| "cannot bind socket".to_owned())?;
-    harden_socket(socket_path)?;
+    harden_socket(socket_path, profile)?;
 
     for connection in listener.incoming() {
         match connection {
             Ok(mut stream) => {
-                let response = handle_request(&mut stream, &registry, &replay, now_unix);
+                let response = handle_request(&mut stream, &registry, &replay, now_unix, profile);
                 write_frame(&mut stream, response.as_bytes())?;
             }
             Err(error) => eprintln!("wallet-core socket accept error: {error}"),
@@ -100,19 +151,23 @@ fn prepare_socket_path(socket_path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn harden_socket(socket_path: &str) -> Result<(), String> {
+fn harden_socket(socket_path: &str, profile: IpcProfile) -> Result<(), String> {
     let path = Path::new(socket_path);
     let mut permissions = fs::metadata(path)
         .map_err(|_| "cannot inspect bound socket".to_owned())?
         .permissions();
-    permissions.set_mode(0o600);
+    permissions.set_mode(profile.socket_mode());
     fs::set_permissions(path, permissions).map_err(|_| "cannot restrict socket mode".to_owned())?;
     let metadata = fs::metadata(path).map_err(|_| "cannot re-inspect bound socket".to_owned())?;
-    if metadata.mode() & 0o7777 != 0o600 {
-        return Err("socket mode is not 0600".to_owned());
+    if metadata.mode() & 0o7777 != profile.socket_mode() {
+        return Err(format!("socket mode is not {:o}", profile.socket_mode()));
     }
     let (uid, gid) = unsafe { (geteuid(), getegid()) };
-    if metadata.uid() != uid || metadata.gid() != gid {
+    let expected_gid = match profile {
+        IpcProfile::Development => gid,
+        IpcProfile::Production { peer_gid, .. } => peer_gid,
+    };
+    if metadata.uid() != uid || metadata.gid() != expected_gid {
         return Err("socket ownership does not match the service process".to_owned());
     }
     Ok(())
@@ -123,7 +178,11 @@ fn handle_request(
     registry: &KeyRegistry,
     replay: &PersistentNonceRegistry,
     now_unix: u64,
+    profile: IpcProfile,
 ) -> String {
+    if let Err(error) = authorize_peer(stream, profile) {
+        return format!("ERR peer:{error}\n");
+    }
     let request = match read_frame(stream) {
         Ok(bytes) => bytes,
         Err(error) => return format!("ERR {error}\n"),
@@ -143,15 +202,47 @@ fn handle_request(
     )
 }
 
+fn authorize_peer(stream: &UnixStream, profile: IpcProfile) -> Result<(), &'static str> {
+    let IpcProfile::Production { peer_uid, peer_gid } = profile else {
+        return Ok(());
+    };
+    let mut credentials = Ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut length = std::mem::size_of::<Ucred>() as c_uint;
+    let result = unsafe {
+        getsockopt(
+            stream.as_raw_fd(),
+            SOL_SOCKET,
+            SO_PEERCRED,
+            &mut credentials as *mut Ucred as *mut c_void,
+            &mut length,
+        )
+    };
+    if result != 0 || length as usize != std::mem::size_of::<Ucred>() {
+        return Err("credentials-unavailable");
+    }
+    if credentials.uid != peer_uid || credentials.gid != peer_gid {
+        return Err("unauthorized-peer");
+    }
+    Ok(())
+}
+
 fn read_frame(stream: &mut UnixStream) -> Result<Vec<u8>, &'static str> {
     let mut header = [0u8; 4];
-    stream.read_exact(&mut header).map_err(|_| "truncated-frame")?;
+    stream
+        .read_exact(&mut header)
+        .map_err(|_| "truncated-frame")?;
     let length = u32::from_be_bytes(header) as usize;
     if length == 0 || length > MAX_FRAME {
         return Err("frame-length");
     }
     let mut payload = vec![0u8; length];
-    stream.read_exact(&mut payload).map_err(|_| "truncated-frame")?;
+    stream
+        .read_exact(&mut payload)
+        .map_err(|_| "truncated-frame")?;
     Ok(payload)
 }
 

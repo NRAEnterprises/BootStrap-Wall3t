@@ -19,7 +19,7 @@ No private key, seed, signing handle, credential, or unrestricted broadcast auth
 | Rust service account | `wall3t-core` |
 | Elixir service account | `wall3t-orchestrator` |
 | IPC group | `wall3t-ipc` |
-| Runtime directory owner/group | `root:wall3t-ipc` |
+| Runtime directory owner/group | `wall3t-core:wall3t-ipc` |
 | Runtime directory mode | `2750` (`setgid`, owner full access, group traverse/read, no other access) |
 | Socket owner | `wall3t-core` |
 | Socket group | `wall3t-ipc` |
@@ -32,11 +32,11 @@ The current reference endpoint forces `0600` and checks ownership against the ef
 
 ## 3. Runtime directory creation
 
-The host service manager or an equivalent privileged provisioning step must create the directory before either service starts. The Rust or Elixir process must not create `/run/wall3t`, change its ownership, or broaden its permissions at runtime.
+The host service manager or an equivalent privileged provisioning step must create the directory before either service starts. The directory is provisioned with `wall3t-core` as owner because Rust must create the socket; the service manager, not the Rust or Elixir process, establishes that ownership and mode. Neither application process may create `/run/wall3t`, change its ownership, or broaden its permissions at runtime.
 
 Required invariants:
 
-- `/run/wall3t` and `/run/wall3t/wallet-core` are owned by `root:wall3t-ipc`.
+- `/run/wall3t` is owned by `root:wall3t-ipc`; `/run/wall3t/wallet-core` is owned by `wall3t-core:wall3t-ipc`.
 - The wallet-core directory is `2750`; group write is prohibited.
 - The directory is not a symlink, mount supplied by an untrusted service, or group/other-writable path.
 - The socket path is absent before the Rust service binds.
