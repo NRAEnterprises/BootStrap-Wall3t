@@ -12,6 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub mod authenticated;
 pub mod domain;
 pub mod evm_intent;
+pub mod hardware;
+pub mod ipc;
 pub mod key_registry;
 pub mod persistence;
 pub mod replay;

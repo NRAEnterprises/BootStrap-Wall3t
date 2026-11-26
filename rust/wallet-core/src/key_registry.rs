@@ -675,10 +675,15 @@ mod tests {
         let path = temp_path("roundtrip");
         let signing_key = SigningKey::from_bytes(&[9; 32]);
         let registry = PersistentKeyRegistry::open(&path).expect("open");
-        registry.register(key_record(&signing_key)).expect("register");
+        registry
+            .register(key_record(&signing_key))
+            .expect("register");
         drop(registry);
         let reopened = PersistentKeyRegistry::open(&path).expect("reopen");
-        assert_eq!(reopened.get("key-1").expect("key").public_key, signing_key.verifying_key().to_bytes());
+        assert_eq!(
+            reopened.get("key-1").expect("key").public_key,
+            signing_key.verifying_key().to_bytes()
+        );
         std::fs::remove_file(path).expect("cleanup");
     }
 
@@ -710,5 +715,45 @@ mod tests {
             Err(KeyRegistryError::PersistenceCorrupt)
         ));
         std::fs::remove_file(path).expect("cleanup");
+    }
+}
+
+#[cfg(test)]
+mod shared_signature_vectors {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    #[test]
+    fn match_expected_outcomes() {
+        for line in include_str!("../../../vectors/phase2_ed25519_vectors.tsv").lines() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let fields: Vec<_> = line.split('|').collect();
+            assert_eq!(fields.len(), 8, "malformed vector: {line}");
+            assert_eq!(fields[1], "ed25519", "unsupported vector: {}", fields[0]);
+            let public_key = decode_hex(fields[4]);
+            let message = decode_hex(fields[5]);
+            let signature = decode_hex(fields[6]);
+            let key =
+                VerifyingKey::from_bytes(public_key.as_slice().try_into().expect("key length"))
+                    .expect("public key");
+            let valid = Signature::from_slice(&signature)
+                .map(|signature| key.verify(&message, &signature).is_ok())
+                .unwrap_or(false);
+            assert_eq!(valid, fields[7] == "valid", "vector {}", fields[0]);
+        }
+    }
+
+    fn decode_hex(value: &str) -> Vec<u8> {
+        assert!(value.len().is_multiple_of(2));
+        value
+            .as_bytes()
+            .chunks(2)
+            .map(|pair| {
+                let high = (pair[0] as char).to_digit(16).expect("hex") as u8;
+                let low = (pair[1] as char).to_digit(16).expect("hex") as u8;
+                (high << 4) | low
+            })
+            .collect()
     }
 }

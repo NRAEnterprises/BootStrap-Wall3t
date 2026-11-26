@@ -5,9 +5,9 @@
     volumes:
       - ./data/bitcoin:/bitcoin/.bitcoin
     ports:
-      - "8332:8332"  # RPC
-      - "8333:8333"  # P2P
-    command: ["-regtest", "-rpcallowip=0.0.0.0/0", "-rpcuser=dev", "-rpcpassword=devpass", "-disablewallet"]
+      - "127.0.0.1:8332:8332"  # RPC; loopback only
+      - "127.0.0.1:8333:8333"  # P2P; loopback only for local development
+    command: ["-regtest", "-rpcallowip=127.0.0.1", "-rpcauth=${BITCOIN_RPC_AUTH:?Set BITCOIN_RPC_AUTH}", "-disablewallet"]
 
   geth:
     image: ethereum/client-go:stable

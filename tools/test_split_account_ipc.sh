@@ -68,7 +68,7 @@ orch_uid="$(id -u "$orch_user")"
 "${run_as[@]}" install -d -o "$core_user" -g "$group" -m 2750 "$parent"
 "${run_as[@]}" install -d -o "$core_user" -g "$group" -m 0750 "$state_path"
 "${run_as[@]}" install -o root -g "$group" -m 0750 "$binary" "$service_binary"
-"${run_as[@]}" setpriv --reuid="$core_uid" --regid="$group_gid" --init-groups -- "$service_binary" "$socket_path" "$signer" "$key_id" "$public_key" "$replay_path" 1700000000 production "$orch_uid" "$group_gid" 2>"$service_err" &
+"${run_as[@]}" setpriv --reuid="$core_uid" --regid="$group_gid" --init-groups -- "$service_binary" "$socket_path" "$signer" "$key_id" "$public_key" "$replay_path" 1700000000 "production:$orch_uid:$group_gid" 2>"$service_err" &
 service_pid=$!
 for _ in $(seq 1 1000); do
   "${run_as[@]}" test -S "$socket_path" && break
@@ -111,6 +111,6 @@ PY
 }
 
 [[ "$(python_client "$orch_user")" == "OK kind=7 payload_bytes=427 registry_version=7"* ]]
-[[ "$(python_client "$attacker_user")" == "ERR peer:unauthorized-peer"* ]]
+[[ "$(python_client "$attacker_user")" == "ERR peer:peer uid is not authorized"* ]]
 
 echo "Split-account production IPC policy: PASS"

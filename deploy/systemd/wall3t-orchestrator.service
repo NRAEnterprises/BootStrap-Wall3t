@@ -1,0 +1,37 @@
+[Unit]
+Description=BootStrap Wall3t automation orchestrator
+Documentation=file:///usr/share/doc/wall3t/IPC_DEPLOYMENT_POLICY.md
+Requires=wall3t-wallet-core.service
+After=wall3t-wallet-core.service
+BindsTo=wall3t-wallet-core.service
+
+[Service]
+Type=simple
+User=wall3t-orchestrator
+Group=wall3t-ipc
+WorkingDirectory=/opt/wall3t/orchestrator
+# The release launcher must perform a non-secret authenticated readiness check
+# before declaring the management plane ready.
+ExecStart=/opt/wall3t/orchestrator/bin/wall3t_orchestrator start
+Restart=on-failure
+RestartSec=1s
+TimeoutStopSec=10s
+
+# Rust is a systemd dependency in this deployment mode; do not let the Elixir
+# application start a second wallet-core child process.
+EnvironmentFile=/etc/wall3t/orchestrator.env
+Environment=WALL3T_RUST_SERVICE_EXTERNAL=1
+Environment=WALL3T_SOCKET_PATH=/run/wall3t/wallet-core/wallet-core.sock
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+ReadWritePaths=/run/wall3t/wallet-core
+
+[Install]
+WantedBy=multi-user.target

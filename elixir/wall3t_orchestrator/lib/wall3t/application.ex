@@ -12,6 +12,8 @@ defmodule Wall3t.Application do
 
   @impl true
   def start(_type, _args) do
+    Wall3t.WalletCore.Readiness.ensure_ready()
+
     children =
       [
         {Registry, keys: :unique, name: Wall3t.AgentRegistry},

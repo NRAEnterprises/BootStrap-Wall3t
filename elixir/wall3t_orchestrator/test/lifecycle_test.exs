@@ -72,6 +72,6 @@ defmodule Wall3t.LifecycleTest do
   defp service_running?(name) do
     RustService.status(name) == :running
   catch
-    :exit, _reason -> false
+    :exit, _ -> false
   end
 end

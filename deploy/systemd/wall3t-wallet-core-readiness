@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Metadata readiness only. The orchestrator performs the authenticated,
+# non-consuming health exchange under its own peer identity before readiness.
+socket_path="${1:?socket path required}"
+expected_owner="${2:?socket owner required}"
+expected_group="${3:?socket group required}"
+expected_mode="${4:?socket mode required}"
+
+parent="$(dirname -- "$socket_path")"
+[[ -S "$socket_path" ]]
+[[ ! -L "$socket_path" ]]
+[[ -d "$parent" ]]
+[[ ! -L "$parent" ]]
+[[ "$(stat -c '%U' -- "$socket_path")" == "$expected_owner" ]]
+[[ "$(stat -c '%G' -- "$socket_path")" == "$expected_group" ]]
+[[ "$(stat -c '%a' -- "$socket_path")" == "$expected_mode" ]]
+[[ "$(stat -c '%a' -- "$parent")" == "2750" ]]
+printf '%s\n' 'wallet-core metadata readiness: PASS'
