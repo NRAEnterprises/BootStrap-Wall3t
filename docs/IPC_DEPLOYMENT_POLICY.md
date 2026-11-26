@@ -19,14 +19,14 @@ No private key, seed, signing handle, credential, or unrestricted broadcast auth
 | Rust service account | `wall3t-core` |
 | Elixir service account | `wall3t-orchestrator` |
 | IPC group | `wall3t-ipc` |
-| Runtime directory owner/group | `wall3t-core:wall3t-ipc` |
+| Runtime directory owner/group | `root:wall3t-ipc` |
 | Runtime directory mode | `2750` (`setgid`, owner full access, group traverse/read, no other access) |
 | Socket owner | `wall3t-core` |
 | Socket group | `wall3t-ipc` |
 | Socket mode | `0660` |
 | Parent filesystem | local runtime filesystem only; never NFS, shared storage, or a world-writable temporary directory |
 
-The Rust service is launched with effective group `wall3t-ipc`; the Elixir service has `wall3t-ipc` as a supplementary or effective group. No other account, container, or service is a member of this group. Group membership changes require service restart and deployment approval.
+The Rust service is launched with effective group `wall3t-ipc`; the Elixir service has `wall3t-ipc` as a supplementary or effective group. No other account, container, or service is a member of this group. Group membership changes require service restart and deployment approval. In socket-activation mode, systemd—not the Rust process—creates the socket node, so the runtime directory remains root-owned and non-writable by the IPC group.
 
 The current reference endpoint forces `0600` and checks ownership against the effective process UID/GID. That is correct for same-identity development execution but does not support the approved split-account production layout. Production support therefore requires an explicit, reviewed IPC profile that changes the expected group and mode to the values above; it must not be implemented by weakening the default or accepting arbitrary environment-provided modes.
 
@@ -36,7 +36,7 @@ The host service manager or an equivalent privileged provisioning step must crea
 
 Required invariants:
 
-- `/run/wall3t` is owned by `root:wall3t-ipc`; `/run/wall3t/wallet-core` is owned by `wall3t-core:wall3t-ipc`.
+- `/run/wall3t` and `/run/wall3t/wallet-core` are owned by `root:wall3t-ipc`.
 - The wallet-core directory is `2750`; group write is prohibited.
 - The directory is not a symlink, mount supplied by an untrusted service, or group/other-writable path.
 - The socket path is absent before the Rust service binds.
